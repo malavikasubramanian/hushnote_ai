@@ -467,8 +467,17 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[HushNote Server] Running on http://localhost:${PORT}`);
+  /*
+   * Loopback only, deliberately.
+   *
+   * Binding to 0.0.0.0 published the note-drafting API to every device on the
+   * network, with no authentication, while an unencrypted session transcript
+   * sat in memory. On a clinic or café network that is a stranger's read of a
+   * live session. The local-first promise has to hold at the network layer, not
+   * only in how data is stored, so nothing off this machine can reach the API.
+   */
+  app.listen(PORT, '127.0.0.1', () => {
+    console.log(`[HushNote Server] Running on http://127.0.0.1:${PORT} (loopback only)`);
   });
 }
 

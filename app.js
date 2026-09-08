@@ -50,9 +50,16 @@ const state = {
   timerInterval: null,
   baseTranscript: '',
   speechTranscriptBuffer: '',
-  transcript: `Client: I've been feeling more anxious lately... it's like this tightness in my chest that won't go away regardless of what I do to try and relax.
-Therapist: Let's explore what triggers that. Does it happen at specific times of the day or during certain activities?
-Client: It usually starts right as I'm getting ready for work in the morning...`,
+  /*
+   * Starts empty, deliberately.
+   *
+   * This used to hold a three-line sample conversation. If the microphone
+   * failed and the clinician typed nothing, that sample was what got drafted —
+   * a confident note about a session that never happened, from content the user
+   * never saw. Sample text now lives only behind the button that loads it, and
+   * executeNoteGeneration() refuses to send an empty transcript.
+   */
+  transcript: '',
   selectedFormat: 'DAP', // 'DAP', 'SOAP', 'BOTH'
   selectedPurpose: 'progress', // 'progress', 'billing', 'insurance'
   generatedNoteResponse: null,
@@ -535,6 +542,9 @@ function showScreen(screenId) {
   });
 
   // The processing overlay animates its checklist only while it is on screen.
+  // A stale "no transcript" message would outlive the problem it describes.
+  if (screenId === 'purpose-screen') clearPurposeError();
+
   if (screenId === 'processing-screen') startProcessingSteps();
   else stopProcessingSteps();
 
@@ -1061,14 +1071,43 @@ function updateTimerDisplay() {
 /**
  * Execute Note Generation API Call
  */
-async function executeNoteGeneration() {
-  showScreen('processing-screen');
+/** The purpose screen's error panel, built in the original markup but never wired. */
+function showPurposeError(message) {
+  const panel = document.getElementById('purposeError');
+  const text = document.getElementById('purposeErrorText');
+  if (text) text.textContent = message;
+  if (panel) panel.hidden = false;
+}
 
+function clearPurposeError() {
+  const panel = document.getElementById('purposeError');
+  if (panel) panel.hidden = true;
+}
+
+async function executeNoteGeneration() {
   // Read current transcript from textarea or state
   let currentTranscript = state.transcript;
   if (elements.transcriptInput && elements.transcriptInput.value) {
     currentTranscript = elements.transcriptInput.value;
   }
+
+  /*
+   * Nothing was said, so there is nothing to draft from. Refusing here is what
+   * makes the empty-transcript case safe: the model is never asked to write a
+   * note about a session it has no record of, and the user is told plainly
+   * rather than being handed a draft built from whatever happened to be around.
+   * Checked before the processing overlay so the message lands on a screen the
+   * user is actually looking at.
+   */
+  if (!currentTranscript || !currentTranscript.trim()) {
+    showPurposeError(
+      'There is no transcript to draft from. Record the session, type it in, or load the sample transcript, then try again.'
+    );
+    return;
+  }
+
+  clearPurposeError();
+  showScreen('processing-screen');
 
   const payload = {
     transcript: currentTranscript,
@@ -1081,7 +1120,19 @@ async function executeNoteGeneration() {
   };
 
   try {
-    console.log('[HushNote Client] Calling POST /api/generate-note with payload:', payload);
+    /*
+     * Shape only, never content. This used to log the whole payload, which put
+     * the full session transcript into the browser console — where it outlives
+     * the "approve and wipe" step in DevTools history, and sits in plain view of
+     * anyone looking over the clinician's shoulder. The same applies to the
+     * response and the approved note below.
+     */
+    console.log('[HushNote Client] POST /api/generate-note', {
+      format: payload.format,
+      purpose: payload.purpose,
+      durationSeconds: payload.durationSeconds,
+      transcriptChars: payload.transcript.length
+    });
 
     const response = await fetch('/api/generate-note', {
       method: 'POST',
@@ -1094,7 +1145,12 @@ async function executeNoteGeneration() {
     }
 
     const data = await response.json();
-    console.log('[HushNote Client] Received note generation response:', data);
+    console.log('[HushNote Client] Note response', {
+      source: data.source,
+      fallback: Boolean(data.fallback),
+      model: data.model,
+      evidenceCount: Array.isArray(data.evidence) ? data.evidence.length : 0
+    });
 
     state.generatedNoteResponse = data;
     // A new draft replaces the old one, so edits to the previous draft must not
@@ -1559,7 +1615,11 @@ async function executeApproveAndDelete() {
      */
     if (!discardOnly) {
       state.approvedNote = getFinalNote();
-      console.log('[HushNote Client] Approved note captured:', state.approvedNote);
+      console.log('[HushNote Client] Approved note captured', {
+        sections: Object.keys(state.approvedNote).filter(
+          key => Array.isArray(state.approvedNote[key]) && state.approvedNote[key].length > 0
+        )
+      });
     }
 
     // Clear raw audio and transcript from client memory
@@ -1609,6 +1669,16 @@ function resetSessionState() {
   state.noteOriginals = {};
   state.noteEdits = {};
   state.approvedNote = null;
+
+  /*
+   * Clear the session's words too. Without this a new session inherited the
+   * previous transcript — in state and still sitting in the textarea — so one
+   * client's session could be drafted into another's note.
+   */
+  state.transcript = '';
+  state.baseTranscript = '';
+  state.speechTranscriptBuffer = '';
+  if (elements.transcriptInput) elements.transcriptInput.value = '';
 
   // Clears the offline notice and returns the primary action to "Approve",
   // enabled — executeApproveAndDelete() leaves it disabled and mid-spinner.
