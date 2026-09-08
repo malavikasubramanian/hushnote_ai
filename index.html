@@ -516,8 +516,32 @@
           <span>Audio and transcript erased from memory</span>
         </p>
 
+        <!-- Export actions. Hidden when the session was discarded rather than
+             approved, since there is no note to take away in that case. -->
+        <div id="exportActions" class="space-y-3">
+          <div class="flex flex-col gap-3 sm:flex-row">
+            <button id="copyNoteBtn" type="button"
+              class="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-control bg-brand px-5 py-3 font-display text-body font-semibold text-on-brand shadow-e1 transition-[background-color,transform] duration-200 ease-cinematic hover:bg-brand-hover active:scale-[0.985]">
+              <svg class="icon size-[18px]" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+              <span id="copyNoteLabel">Copy to clipboard</span>
+            </button>
+
+            <button id="downloadNoteBtn" type="button"
+              class="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-control border border-line bg-card px-5 py-3 font-display text-body font-semibold text-accent shadow-e1 transition-[background-color,transform] duration-200 ease-cinematic hover:bg-surface active:scale-[0.985]">
+              <svg class="icon size-[18px]" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+              <span id="downloadNoteLabel">Download as .txt</span>
+            </button>
+          </div>
+
+          <!-- The note lives only in this tab's memory. Once it is gone, it is
+               gone — worth saying before the user closes the window. -->
+          <p class="text-body-sm leading-snug text-ink-muted">
+            This note is only held in this browser tab. Copy or download it before you leave.
+          </p>
+        </div>
+
         <button id="startNewSessionBtn" type="button"
-          class="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-control bg-brand px-6 py-3 font-display text-body font-semibold text-on-brand shadow-e1 transition-[background-color,transform] duration-200 ease-cinematic hover:bg-brand-hover active:scale-[0.985]">
+          class="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-control border border-line bg-card px-6 py-3 font-display text-body font-semibold text-accent transition-[background-color,transform] duration-200 ease-cinematic hover:bg-surface active:scale-[0.985]">
           Start a new session
         </button>
       </div>

@@ -297,6 +297,14 @@ function bindEventListeners() {
     btn.addEventListener('click', resetSessionState);
   });
 
+  // 8b. Taking the note away. Both read state.approvedNote, so what leaves the
+  //     app is the edited note rather than the model's original draft.
+  const copyBtn = document.getElementById('copyNoteBtn');
+  if (copyBtn) copyBtn.addEventListener('click', copyApprovedNote);
+
+  const downloadBtn = document.getElementById('downloadNoteBtn');
+  if (downloadBtn) downloadBtn.addEventListener('click', downloadApprovedNote);
+
   // 9. Header lockup returns home. Mid-session it discards, so it confirms.
   const homeLockup = document.getElementById('homeLockup');
   if (homeLockup) {
@@ -1352,6 +1360,121 @@ function paintSuccessCopy(discardOnly) {
       ? 'No note was drafted, and the raw data is gone.'
       : 'Everything else is gone.';
   }
+
+  // Nothing to copy or download when the draft was discarded.
+  const exportActions = document.getElementById('exportActions');
+  if (exportActions) exportActions.hidden = discardOnly || !state.approvedNote;
+}
+
+/* ------------------------------------------------------------------ *
+ * Leaving with the note
+ * ------------------------------------------------------------------ */
+
+const NOTE_SECTION_LABELS = {
+  data: 'Data',
+  subjective: 'Subjective',
+  objective: 'Objective',
+  assessment: 'Assessment',
+  plan: 'Plan',
+};
+
+/** Mirrors the order renderReviewScreen() lays the fields out in. */
+function noteSectionOrder() {
+  return (state.selectedFormat === 'SOAP' || state.selectedFormat === 'BOTH')
+    ? ['subjective', 'objective', 'assessment', 'plan']
+    : ['data', 'assessment', 'plan'];
+}
+
+/**
+ * The approved note as plain text.
+ *
+ * Reads state.approvedNote — the clinician's edits as captured at approval —
+ * never state.generatedNoteResponse, which still holds what the model first
+ * wrote. An empty section is marked "not documented" rather than omitted, so a
+ * gap in the record is visible instead of silently disappearing.
+ */
+function formatApprovedNoteText() {
+  const note = state.approvedNote;
+  if (!note) return '';
+
+  const stamp = new Date().toLocaleDateString(undefined, {
+    year: 'numeric', month: 'long', day: 'numeric'
+  });
+
+  const lines = [
+    'HushNote — Clinical Progress Note',
+    `${state.selectedFormat} format · ${stamp}`,
+    ''
+  ];
+
+  for (const key of noteSectionOrder()) {
+    const entries = Array.isArray(note[key]) ? note[key].filter(Boolean) : [];
+    lines.push(NOTE_SECTION_LABELS[key].toUpperCase());
+    if (entries.length) {
+      for (const entry of entries) lines.push(`- ${entry}`);
+    } else {
+      lines.push('(not documented)');
+    }
+    lines.push('');
+  }
+
+  return `${lines.join('\n').trimEnd()}\n`;
+}
+
+/** Brief label swap, so a click that produces no visible change still lands. */
+function flashLabel(labelId, temporary, revertTo) {
+  const el = document.getElementById(labelId);
+  if (!el) return;
+  el.textContent = temporary;
+  window.setTimeout(() => { el.textContent = revertTo; }, 2000);
+}
+
+async function copyApprovedNote() {
+  const text = formatApprovedNoteText();
+  if (!text) return;
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      // The async clipboard API needs a secure context. Fall back so the button
+      // still works when the app is served over plain http on a LAN address.
+      const scratch = document.createElement('textarea');
+      scratch.value = text;
+      scratch.setAttribute('readonly', '');
+      scratch.style.position = 'fixed';
+      scratch.style.opacity = '0';
+      document.body.appendChild(scratch);
+      scratch.select();
+      document.execCommand('copy');
+      document.body.removeChild(scratch);
+    }
+    flashLabel('copyNoteLabel', 'Copied', 'Copy to clipboard');
+  } catch (err) {
+    console.error('[HushNote Client] Copy failed:', err);
+    flashLabel('copyNoteLabel', 'Copy failed — select the text manually', 'Copy to clipboard');
+  }
+}
+
+function downloadApprovedNote() {
+  const text = formatApprovedNoteText();
+  if (!text) return;
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `hushnote-note-${stamp}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  // Revoking in the same tick can cancel the download in some browsers.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  flashLabel('downloadNoteLabel', 'Downloaded', 'Download as .txt');
 }
 
 /**
@@ -1722,5 +1845,8 @@ window.HushNoteApp = {
   getFinalNote,
   setMicState,
   teardownRecording,
-  startSpeechRecognition
+  startSpeechRecognition,
+  formatApprovedNoteText,
+  copyApprovedNote,
+  downloadApprovedNote
 };
