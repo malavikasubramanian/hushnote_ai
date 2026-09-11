@@ -99,10 +99,14 @@ function detectAlternateCodes(transcript: string) {
 /**
  * The checklist line for a draft's evidence quotes: how many there are, how
  * many carry a timestamp verifyEvidence() confirmed against the transcript,
- * and how many it could not find in the transcript at all. It has to stay true
- * at every count, including none confirmed (always the case for a live
- * recording) and none unverified (the common case) — a draft whose only
- * evidence is unverified must not read the same as one that is fully backed.
+ * and how many verifyQuote() could not mark verbatim or abridged. That last
+ * count says "unverified", matching the chip label, rather than "not found in
+ * the transcript" — a quote can also be unverified for being too short to
+ * count as evidence while still being right there in the transcript, and
+ * "not found" would be false for it. Has to stay true at every count,
+ * including none confirmed (always the case for a live recording) and none
+ * unverified (the common case) — a draft whose only evidence is unverified
+ * must not read the same as one that is fully backed.
  */
 function describeEvidence(total: number, confirmed: number, unverified: number) {
   const quotes = `${total} evidence quote${total === 1 ? '' : 's'} referenced`;
@@ -112,10 +116,10 @@ function describeEvidence(total: number, confirmed: number, unverified: number) 
       ? (total === 1 ? 'its timestamp confirmed against the transcript' : 'all timestamps confirmed against the transcript')
       : `${confirmed} with a timestamp confirmed against the transcript`;
   if (unverified === 0) return `${quotes}, ${time}`;
-  const unfound = unverified === total
-    ? (total === 1 ? 'not found in the transcript as written' : 'none found in the transcript as written')
-    : `${unverified} not found in the transcript as written`;
-  return `${quotes}, ${time}, ${unfound}`;
+  const status = unverified === total
+    ? (total === 1 ? 'unverified' : 'none verified')
+    : `${unverified} unverified`;
+  return `${quotes}, ${time}, ${status}`;
 }
 
 // Readiness evaluation logic based on purpose selection

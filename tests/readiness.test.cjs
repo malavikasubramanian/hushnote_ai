@@ -44,7 +44,7 @@ module.exports = async function run() {
   check('all confirmed', readinessFor('progress', TIMED, QUOTES).checksPassed,
     ['2 evidence quotes referenced, all timestamps confirmed against the transcript']);
   check('some confirmed, and the unmatched one says so', readinessFor('progress', TIMED, [...QUOTES, { quote: 'a paraphrase that is not in the transcript', timestamp: '01:00' }]).checksPassed,
-    ['3 evidence quotes referenced, 2 with a timestamp confirmed against the transcript, 1 not found in the transcript as written']);
+    ['3 evidence quotes referenced, 2 with a timestamp confirmed against the transcript, 1 unverified']);
   check('one quote, confirmed', readinessFor('progress', TIMED, [QUOTES[0]]).checksPassed,
     ['1 evidence quote referenced, its timestamp confirmed against the transcript']);
   check('one quote, not confirmed', readinessFor('progress', LIVE, [QUOTES[0]]).checksPassed,
@@ -56,13 +56,21 @@ module.exports = async function run() {
   check('a progress draft passes on an unverified quote alone (existence, not proof, is the gate)',
     unverifiedOnly.completed, true);
   check('but the checklist admits it was never found, not just that it lacks a time',
-    unverifiedOnly.checksPassed, ['1 evidence quote referenced, no timestamp confirmed against the transcript, not found in the transcript as written']);
+    unverifiedOnly.checksPassed, ['1 evidence quote referenced, no timestamp confirmed against the transcript, unverified']);
   check('a mix of confirmed and unverified quotes states both counts',
     readinessFor('progress', TIMED, [...QUOTES, INVENTED]).checksPassed,
-    ['3 evidence quotes referenced, 2 with a timestamp confirmed against the transcript, 1 not found in the transcript as written']);
+    ['3 evidence quotes referenced, 2 with a timestamp confirmed against the transcript, 1 unverified']);
   check('when every quote is unverified, the clause reads "none", not "N"',
     readinessFor('progress', TIMED, [INVENTED, { quote: 'another line no one in the session ever said', timestamp: '09:30' }]).checksPassed,
-    ['2 evidence quotes referenced, no timestamp confirmed against the transcript, none found in the transcript as written']);
+    ['2 evidence quotes referenced, no timestamp confirmed against the transcript, none verified']);
+
+  // A quote can be unverified for being too short, while still sitting right there
+  // in the transcript — "unverified" must not be read as "absent". See the
+  // account of this bug: the old wording said "not found in the transcript".
+  const SHORT_TRANSCRIPT = '[00:00] Client: My mind reading got a lot worse this week.';
+  check('a too-short quote reads as unverified, never as "not found"',
+    readinessFor('progress', SHORT_TRANSCRIPT, [{ quote: 'mind reading', timestamp: '00:00' }]).checksPassed,
+    ['1 evidence quote referenced, no timestamp confirmed against the transcript, unverified']);
 
   console.log('\n  -- a progress draft with no quotes at all is still incomplete');
   const none = readinessFor('progress', TIMED, []);
