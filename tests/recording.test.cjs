@@ -83,7 +83,7 @@ module.exports = async function run() {
   const { check, results } = createChecker('recording');
 
   let ctl;
-  const { window, App, $ } = boot({ beforeLoad: (w) => { ctl = fakeMedia(w); } });
+  const { window, App, $ } = await boot({ beforeLoad: (w) => { ctl = fakeMedia(w); } });
 
   const badge = () => ($('recordingIndicatorText') || {}).textContent;
   const parked = () => $('waveform').classList.contains('waveform-idle');

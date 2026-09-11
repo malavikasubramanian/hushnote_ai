@@ -82,7 +82,7 @@ module.exports = async function run() {
   const { check, results } = createChecker('privacy');
 
   let logs;
-  const { window, App, $ } = boot({
+  const { window, App, $ } = await boot({
     beforeLoad: (w) => { stubApi(w); logs = captureConsole(w); },
   });
 

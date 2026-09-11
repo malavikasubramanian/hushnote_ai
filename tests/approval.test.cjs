@@ -66,7 +66,7 @@ module.exports = async function run() {
 
   let calls;
   const mediaCalls = [];
-  const { window, App, $ } = boot({ beforeLoad: (w) => {
+  const { window, App, $ } = await boot({ beforeLoad: (w) => {
     calls = stubApi(w);
     // jsdom has no media playback; record what the wipe asks of the player.
     w.HTMLMediaElement.prototype.load = function load() { mediaCalls.push('load'); };
@@ -221,6 +221,18 @@ module.exports = async function run() {
   console.log('\n  -- a failed wipe call is never framed as exposed data');
   check('no wipe-failure panel on the review screen', $('purgeError'), null);
   check('no alert() at any point', alerts, []);
+
+  /*
+   * Harness regression. It used to dispatch its own DOMContentLoaded and jsdom
+   * then fired the real one at the first await, so app.js bound every inline
+   * handler twice and a single click here raised two dialogs.
+   */
+  console.log('\n  -- a back link clicked after an await runs its handler once');
+  const confirms = [];
+  window.confirm = (message) => { confirms.push(message); return true; };
+  window.document.querySelector('[data-back="purpose-screen"]').click();
+  check('one confirmation dialog per click', confirms.length, 1);
+  check('lands on the purpose screen', App.state.currentScreen, 'purpose-screen');
 
   window.close();
   return results;

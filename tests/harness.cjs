@@ -22,9 +22,11 @@ const ROOT = path.resolve(__dirname, '..');
  * @param {(window: object) => void} [options.beforeLoad]
  *   Runs after the document exists but before app.js executes — the only place
  *   to install globals the script touches while initialising.
- * @returns {{window: object, App: object, $: (id: string) => object|null}}
+ * @returns {Promise<{window: object, App: object, $: (id: string) => object|null}>}
+ *   Resolves once app.js has initialised on jsdom's real DOMContentLoaded, so
+ *   every suite must `await boot(...)` before driving the app.
  */
-function boot(options = {}) {
+async function boot(options = {}) {
   // app.js is injected as a classic script rather than left as the module tag,
   // so it shares the window scope and its globals stay reachable from a test.
   const html = fs
@@ -59,7 +61,18 @@ function boot(options = {}) {
   const script = window.document.createElement('script');
   script.textContent = appJs;
   window.document.body.appendChild(script);
-  window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
+
+  /*
+   * Initialise on jsdom's own DOMContentLoaded, not a synthetic one. jsdom
+   * queues the real event while constructing the document and fires it at the
+   * first microtask checkpoint afterwards, so dispatching our own here made
+   * app.js initialise twice: once now, and again at a test's first await, with
+   * every inline handler bound a second time. Awaiting the real event runs it
+   * once — trusted, with readyState "interactive" — as a browser would.
+   */
+  await new Promise((resolve) => {
+    window.document.addEventListener('DOMContentLoaded', resolve, { once: true });
+  });
 
   if (!window.HushNoteApp) {
     throw new Error('app.js did not expose window.HushNoteApp — did initialisation throw?');

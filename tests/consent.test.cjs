@@ -13,7 +13,7 @@ module.exports = async function run() {
   const { check, results } = createChecker('consent');
 
   const alerts = [];
-  const { window, App, $ } = boot({ beforeLoad: (w) => { w.alert = (m) => alerts.push(m); } });
+  const { window, App, $ } = await boot({ beforeLoad: (w) => { w.alert = (m) => alerts.push(m); } });
 
   // Recording itself is covered by recording.test.cjs; here it only matters
   // whether a session was started at all.
