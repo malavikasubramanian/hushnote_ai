@@ -1176,8 +1176,12 @@ async function executeNoteGeneration() {
 
   } catch (error) {
     console.error('[HushNote Client] Note generation error:', error);
-    alert(`Note generation failed: ${error.message}. Please verify the backend server is running.`);
+    // The screen goes first: showing the purpose screen clears its error panel,
+    // so a message raised before it would be wiped the moment it appeared.
     showScreen('purpose-screen');
+    showPurposeError(
+      `The note could not be drafted: ${error.message}. Check that the HushNote server is running, then try again.`
+    );
   }
 }
 
