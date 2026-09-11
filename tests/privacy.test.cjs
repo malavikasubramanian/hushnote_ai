@@ -133,6 +133,27 @@ module.exports = async function run() {
   await App.executeNoteGeneration();
   check('refused after reset', App.state.generatedNoteResponse, null);
 
+  console.log('\n  -- a failed wipe call still clears the browser, and logs no content');
+  App.state.transcript = TRANSCRIPT;
+  App.state.selectedFormat = 'DAP';
+  await App.executeNoteGeneration();
+  await wait(1600);
+  $('note-data').value = 'Client denied chest pain.';
+  fire(window, $('note-data'), 'input');
+  const workingApi = window.fetch;
+  window.fetch = (url, options) => String(url).includes('/api/delete-raw-session')
+    ? Promise.reject(new Error('Failed to fetch'))
+    : workingApi(url, options);
+  const beforeFailedWipe = logs.length;
+  await App.executeApproveAndDelete();
+  await wait(900);
+  window.fetch = workingApi;
+  const failedWipeLogs = logs.slice(beforeFailedWipe).join('\n');
+  check('transcript cleared despite the failed call', App.state.transcript, '');
+  check('the failure is logged', /Wipe event not recorded/.test(failedWipeLogs), true);
+  check('the failure log carries no transcript', failedWipeLogs.includes('That helped, thank you'), false);
+  check('the failure log carries no note text', failedWipeLogs.includes('Client denied chest pain.'), false);
+
   window.close();
   return results;
 };

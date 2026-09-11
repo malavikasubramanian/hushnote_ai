@@ -21,21 +21,16 @@ app.use(express.urlencoded({ extended: true }));
 
 /**
  * PRIVACY & COMPLIANCE ARCHITECTURE NOTE:
- * - This prototype stores raw transcript and audio snippets ONLY temporarily in memory.
+ * - The server keeps no session data. A transcript exists here only for the
+ *   life of the /api/generate-note request that carries it: it goes to the
+ *   local model and is dropped once the response is sent. Audio never reaches
+ *   the server at all; it stays in the browser tab.
  * - Production-grade deployment requirements:
- *   1. Encryption-at-rest: AES-256-GCM for ephemeral storage.
- *   2. Strict authentication & authorization: OAuth2 / JWT with role-based access controls.
- *   3. Immutable Audit Logging: Append-only log of access, note generation, and deletion events for HIPAA compliance.
- *   4. Zero-retention policy enforcement: Automatic TTL purging of temporary session buffers.
+ *   1. Strict authentication & authorization: OAuth2 / JWT with role-based access controls.
+ *   2. Immutable Audit Logging: Append-only log of note generation and approve/discard events for HIPAA compliance.
+ *   3. Zero retention stays the rule: anything that starts holding transcripts
+ *      server-side needs encryption at rest and TTL purging before it ships.
  */
-interface RawSessionBuffer {
-  id?: string;
-  transcript: string;
-  timestamp: string;
-  audioBlobReceived?: boolean;
-}
-
-let activeRawSession: RawSessionBuffer | null = null;
 
 /*
  * Local model defaults, defined once. /api/health previously carried its own
@@ -250,8 +245,9 @@ function calculateReadiness(
  *     transcript would be accurate but misleading: it implies the session was
  *     analysed and a note was grounded in it, when neither happened.
  *
- * The transcript itself is untouched and still held in activeRawSession, so the
- * therapist loses nothing by drafting again once the model is up.
+ * The server keeps nothing from this request, and the therapist loses nothing
+ * either: the transcript is still in the browser, and drafting again once the
+ * model is up sends it afresh.
  */
 function buildUnavailableResponse(format: string, purpose: string) {
   return {
@@ -289,12 +285,9 @@ app.post('/api/generate-note', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Transcript content is required.' });
     }
 
-    // Keep raw session temporarily in memory (for prototype flow)
-    activeRawSession = {
-      id: 'session_' + Date.now(),
-      transcript,
-      timestamp: new Date().toISOString()
-    };
+    // The transcript is used for this request only and never stored, so nothing
+    // outlives the response however the session ends — approved, discarded, or
+    // abandoned with the tab.
 
     const systemPrompt = `You are HushNote, a clinical AI note drafting assistant for therapists.
 STRICT CLINICAL RULES:
@@ -419,36 +412,37 @@ Return a JSON object with this EXACT structure:
 
 // POST /api/delete-raw-session
 app.post('/api/delete-raw-session', (req: Request, res: Response) => {
-  // Permanently delete raw transcript and audio buffer from memory
-  activeRawSession = null;
-
   /*
+   * There is nothing here to delete: the server keeps no session data (see
+   * /api/generate-note). The endpoint stays because the client's approve and
+   * discard flow calls it before clearing the browser's own copy, and because it
+   * is where that event would be audited.
+   *
    * COMPLIANCE AUDIT LOGGING STUB:
    * In a HIPAA-compliant production build, emit an immutable audit event:
    * auditLogger.log({
-   *   event: 'RAW_SESSION_PURGED',
+   *   event: 'SESSION_WIPE_REQUESTED',
    *   timestamp: new Date().toISOString(),
    *   actorId: req.user.id,
-   *   action: 'PERMANENT_ERASURE',
    *   status: 'SUCCESS'
    * });
    */
 
   return res.json({
     success: true,
-    message: 'Raw audio buffer and transcript purged permanently from memory.',
+    message: 'No session data is held on the server, so there was nothing to delete.',
     timestamp: new Date().toISOString()
   });
 });
 
 // GET /api/health
+// No rawSessionInMemory flag: with nothing retained it could only ever be false.
 app.get('/api/health', (req: Request, res: Response) => {
   res.json({
     status: 'ok',
     appName: 'HushNote',
     ollamaBaseUrl: process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL,
-    ollamaModel: process.env.OLLAMA_MODEL || DEFAULT_OLLAMA_MODEL,
-    rawSessionInMemory: !!activeRawSession
+    ollamaModel: process.env.OLLAMA_MODEL || DEFAULT_OLLAMA_MODEL
   });
 });
 

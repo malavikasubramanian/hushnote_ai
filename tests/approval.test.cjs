@@ -2,19 +2,28 @@
  * Approving a note and purging the raw session.
  *
  * Regression cover for the defect where approval kept whatever the model wrote
- * rather than the clinician's corrections, for the privacy promise that the
- * transcript and audio are gone once the note is approved, and for a failed wipe
- * being reported on the review screen — rather than in an OS dialog, or not at
- * all when the server answered with an error status.
+ * rather than the clinician's corrections, and for the privacy promise that the
+ * transcript and audio are gone once the note is approved or discarded — even
+ * when the wipe call fails or never answers. The server holds no session data,
+ * so the browser's copy is the only one there is, and nothing about that call
+ * may hold its clearing back.
  *
  * The API is stubbed rather than reached over the network, so the suite runs
  * without a server or a model. What it asserts is client behaviour: which text
- * survives approval, and what is cleared afterwards. The server's own purge is
- * covered by server-side behaviour, not here.
+ * survives approval, and what is cleared afterwards. The server holds no session
+ * data, so there is nothing server-side to purge; the endpoint is stubbed only
+ * so the wipe flow runs.
  */
 const { boot, fire, wait, createChecker } = require('./harness.cjs');
 
+const SESSION = '[00:00] Therapist: Hello.\n[45:00] Client: That helped, thank you.';
 const DRAFTED_DATA = 'Client described a difficult week at work.';
+const UNAVAILABLE = {
+  success: true, source: 'fallback_offline', fallback: true, fallbackReason: 'no model', format: 'DAP',
+  note: { data: [], subjective: [], objective: [], assessment: [], plan: [] },
+  evidence: [], missing_fields: [],
+  readiness: { completed: false, unavailable: true, label: 'Not drafted', checksPassed: [], missing: [] },
+};
 
 function stubApi(window) {
   const calls = [];
@@ -57,8 +66,10 @@ module.exports = async function run() {
 
   let calls;
   const { window, App, $ } = boot({ beforeLoad: (w) => { calls = stubApi(w); } });
+  const alerts = [];
+  window.alert = (message) => { alerts.push(message); };
 
-  App.state.transcript = '[00:00] Therapist: Hello.\n[45:00] Client: That helped, thank you.';
+  App.state.transcript = SESSION;
   App.state.recordingSeconds = 2700;
   App.state.selectedFormat = 'DAP';
   App.state.selectedPurpose = 'billing_insurance';
@@ -79,41 +90,10 @@ module.exports = async function run() {
   fire(window, $('note-data'), 'input');
   check('correction differs from the draft', $('note-data').value !== DRAFTED_DATA, true);
 
-  console.log('\n  -- a failed wipe says so on the review screen, and clears nothing');
-  const alerts = [];
-  window.alert = (message) => { alerts.push(message); };
-  const workingFetch = window.fetch;
-  window.fetch = (url, options) => String(url).includes('/api/delete-raw-session')
-    ? Promise.reject(new Error('Failed to fetch'))
-    : workingFetch(url, options);
-  await App.executeApproveAndDelete();
-  check('no alert() was raised', alerts, []);
-  check('the wipe error panel is showing', $('purgeError').hidden, false);
-  check('message says nothing was cleared', /Nothing has been cleared/.test($('purgeErrorText').textContent), true);
-  check('still on the review screen', App.state.currentScreen, 'review-screen');
-  check('no note was saved', App.state.approvedNote, null);
-  check('transcript still held', App.state.transcript !== '', true);
-  check('the correction is still in the field', $('note-data').value, CORRECTION);
-  check('the button can be pressed again', $('approveDeleteBtn').disabled, false);
-
-  console.log('\n  -- an HTTP error is a failed wipe, not a successful one');
-  window.fetch = (url, options) => String(url).includes('/api/delete-raw-session')
-    ? Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) })
-    : workingFetch(url, options);
-  await App.executeApproveAndDelete();
-  await wait(900);
-  check('not sent to the success screen', App.state.currentScreen, 'review-screen');
-  check('the panel names the status', /status 500/.test($('purgeErrorText').textContent), true);
-  check('still no note saved', App.state.approvedNote, null);
-  check('transcript still held after an HTTP error', App.state.transcript !== '', true);
-  window.fetch = workingFetch;
-
   console.log('\n  -- approving keeps the correction, not the draft');
   await App.executeApproveAndDelete();
   await wait(900);
 
-  check('the wipe error panel cleared on success', $('purgeError').hidden, true);
-  check('no alert() at any point', alerts, []);
   check('approved note captured', !!App.state.approvedNote, true);
   check('approved note uses the correction', App.state.approvedNote.data, [CORRECTION]);
   check('approved note does not keep the draft', App.state.approvedNote.data.includes(DRAFTED_DATA), false);
@@ -124,6 +104,71 @@ module.exports = async function run() {
   check('transcript cleared', App.state.transcript, '');
   check('audio chunks cleared', App.state.audioChunks, []);
   check('consent cleared for the next session', App.state.consentGiven, false);
+
+  /*
+   * The server keeps nothing, so a failed wipe call can only mean the event went
+   * unrecorded. None of these outcomes may hold the browser's copy back.
+   */
+  const workingFetch = window.fetch;
+  let wipeCalls = 0;
+
+  async function sessionEndingWith(wipeReply, { fallback = false } = {}) {
+    App.resetSessionState();
+    App.state.transcript = SESSION;
+    App.state.recordingSeconds = 2700;
+    App.state.selectedFormat = 'DAP';
+    wipeCalls = 0;
+    window.fetch = (url, options) => {
+      if (String(url).includes('/api/delete-raw-session')) {
+        wipeCalls += 1;
+        return wipeReply();
+      }
+      if (fallback && String(url).includes('/api/generate-note')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(UNAVAILABLE) });
+      }
+      return workingFetch(url, options);
+    };
+    await App.executeNoteGeneration();
+    await wait(1600);
+    if (!fallback) {
+      $('note-data').value = CORRECTION;
+      fire(window, $('note-data'), 'input');
+    }
+    // Deliberately not awaited: a wipe call that never answers must not hold
+    // the local wipe back, and awaiting it would hang the suite instead.
+    App.executeApproveAndDelete();
+    await wait(900);
+    window.fetch = workingFetch;
+  }
+
+  const failures = [
+    ['the server cannot be reached', () => Promise.reject(new Error('Failed to fetch'))],
+    ['the server answers with an error status', () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) })],
+    ['the server never answers', () => new Promise(() => {})],
+  ];
+
+  for (const [label, wipeReply] of failures) {
+    console.log(`\n  -- approving still clears the browser's copy when ${label}`);
+    await sessionEndingWith(wipeReply);
+    check('the wipe call was still made', wipeCalls, 1);
+    check('reaches the success screen', App.state.currentScreen, 'success-screen');
+    check('the edited note is kept', App.state.approvedNote && App.state.approvedNote.data, [CORRECTION]);
+    check('transcript cleared', App.state.transcript, '');
+    check('audio chunks cleared', App.state.audioChunks, []);
+    check('consent cleared', App.state.consentGiven, false);
+  }
+
+  console.log("\n  -- discarding still clears the browser's copy when the server cannot be reached");
+  await sessionEndingWith(() => Promise.reject(new Error('Failed to fetch')), { fallback: true });
+  check('the wipe call was still made', wipeCalls, 1);
+  check('reaches the success screen', App.state.currentScreen, 'success-screen');
+  check('says nothing was kept', $('success-title').textContent.trim(), 'Nothing was kept');
+  check('no note kept', App.state.approvedNote, null);
+  check('transcript cleared', App.state.transcript, '');
+
+  console.log('\n  -- a failed wipe call is never framed as exposed data');
+  check('no wipe-failure panel on the review screen', $('purgeError'), null);
+  check('no alert() at any point', alerts, []);
 
   window.close();
   return results;

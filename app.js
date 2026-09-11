@@ -1340,9 +1340,9 @@ function renderFallbackNotice(data) {
 
 /**
  * In fallback mode there is nothing to approve, so the primary action changes
- * identity rather than being disabled outright: POST /api/delete-raw-session is
- * the only path that clears activeRawSession on the server, and blocking it
- * would strand the raw transcript in memory — the opposite of the promise.
+ * identity rather than being disabled outright: the clinician still needs a way
+ * to clear the audio and transcript from this tab, and a disabled button would
+ * leave them sitting in memory — the opposite of the promise.
  */
 function applyFallbackGate(isFallback) {
   state.isFallback = Boolean(isFallback);
@@ -1534,8 +1534,6 @@ function renderReviewScreen(data) {
   // 0. Provenance first — everything below is only trustworthy if a model ran.
   renderFallbackNotice(data);
   applyFallbackGate(data.fallback);
-  // A wipe failure belongs to the draft it was raised on, not to this one.
-  clearPurgeError();
 
   if (data.fallback) {
     renderUnavailableReview();
@@ -1701,25 +1699,39 @@ function renderReviewScreen(data) {
   }
 }
 
-/** The review screen's wipe-failure panel. Only ever describes the latest attempt. */
-function showPurgeError(message) {
-  const panel = document.getElementById('purgeError');
-  const text = document.getElementById('purgeErrorText');
-  if (text) text.textContent = message;
-  if (panel) panel.hidden = false;
-}
-
-function clearPurgeError() {
-  const panel = document.getElementById('purgeError');
-  if (panel) panel.hidden = true;
+/**
+ * Tells the server a session was approved or discarded.
+ *
+ * There is nothing for it to delete — the server keeps no session data — so the
+ * call exists for the audit event a production build would record there. It
+ * gates nothing: the browser's copy is cleared whether or not this succeeds.
+ * A failure is logged rather than shown, because no failure here can leave
+ * session data exposed, and the log carries the outcome only, never content.
+ */
+async function recordWipeEvent() {
+  try {
+    console.log('[HushNote Client] Calling POST /api/delete-raw-session');
+    const response = await fetch('/api/delete-raw-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'active' })
+    });
+    if (!response.ok) {
+      console.warn(`[HushNote Client] Wipe event not recorded: server returned status ${response.status}`);
+      return;
+    }
+    console.log('[HushNote Client] Wipe event recorded');
+  } catch (error) {
+    console.warn('[HushNote Client] Wipe event not recorded:', error.message);
+  }
 }
 
 /**
  * Approve Note & Purge Raw Data
  */
 async function executeApproveAndDelete() {
-  // Captured up front: the purge clears state, and the error path below needs
-  // to restore the button to whichever identity it started with.
+  // Captured up front: the purge clears state, and the success copy still needs
+  // to know which of the two actions this was.
   const discardOnly = state.isFallback;
 
   /*
@@ -1732,8 +1744,6 @@ async function executeApproveAndDelete() {
     return;
   }
 
-  clearPurgeError();
-
   if (elements.approveDeleteBtn) {
     elements.approveDeleteBtn.disabled = true;
     elements.approveDeleteBtn.innerHTML =
@@ -1741,65 +1751,39 @@ async function executeApproveAndDelete() {
       + `<path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>${discardOnly ? 'Discarding…' : 'Purging raw data…'}</span>`;
   }
 
-  try {
-    console.log('[HushNote Client] Calling POST /api/delete-raw-session');
+  // Sent first, awaited last: the local wipe below never waits on the server.
+  const wipeEvent = recordWipeEvent();
 
-    const response = await fetch('/api/delete-raw-session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: 'active' })
+  /*
+   * Capture the note as the clinician left it BEFORE the raw data goes. This
+   * is the whole point of the review screen: what gets kept is the edited
+   * note, not what the model originally wrote.
+   */
+  if (!discardOnly) {
+    state.approvedNote = getFinalNote();
+    console.log('[HushNote Client] Approved note captured', {
+      sections: Object.keys(state.approvedNote).filter(
+        key => Array.isArray(state.approvedNote[key]) && state.approvedNote[key].length > 0
+      )
     });
-
-    // An error status is a failed wipe. Reading it as success would put
-    // "Everything else is gone" on screen while the server may still hold it all.
-    if (!response.ok) {
-      throw new Error(`Server returned status ${response.status}`);
-    }
-
-    const resData = await response.json();
-    console.log('[HushNote Client] Raw session purged response:', resData);
-
-    /*
-     * Capture the note as the clinician left it BEFORE the raw data goes. This
-     * is the whole point of the review screen: what gets kept is the edited
-     * note, not what the model originally wrote.
-     */
-    if (!discardOnly) {
-      state.approvedNote = getFinalNote();
-      console.log('[HushNote Client] Approved note captured', {
-        sections: Object.keys(state.approvedNote).filter(
-          key => Array.isArray(state.approvedNote[key]) && state.approvedNote[key].length > 0
-        )
-      });
-    }
-
-    // Clear raw audio and transcript from client memory
-    if (state.audioUrl) {
-      URL.revokeObjectURL(state.audioUrl);
-      state.audioUrl = null;
-    }
-    state.audioChunks = [];
-    state.transcript = '';
-    state.consentGiven = false;
-
-    paintSuccessCopy(discardOnly);
-
-    setTimeout(() => {
-      showScreen('success-screen');
-    }, 600);
-
-  } catch (error) {
-    console.error('[HushNote Client] Error purging raw session:', error);
-    // Every failure lands here before anything is captured or cleared, so the
-    // note, transcript and audio are all still held. The message says exactly that.
-    showPurgeError(
-      `The wipe request failed: ${error.message}. Nothing has been cleared${discardOnly ? '' : ' and your edits are still here'}. Check that the HushNote server is running, then try again.`
-    );
-    if (elements.approveDeleteBtn) {
-      elements.approveDeleteBtn.disabled = false;
-      elements.approveDeleteBtn.innerHTML = discardOnly ? DISCARD_HTML : APPROVE_HTML;
-    }
   }
+
+  // Clear raw audio and transcript from client memory
+  if (state.audioUrl) {
+    URL.revokeObjectURL(state.audioUrl);
+    state.audioUrl = null;
+  }
+  state.audioChunks = [];
+  state.transcript = '';
+  state.consentGiven = false;
+
+  paintSuccessCopy(discardOnly);
+
+  setTimeout(() => {
+    showScreen('success-screen');
+  }, 600);
+
+  await wipeEvent;
 }
 
 /**
@@ -1839,7 +1823,6 @@ function resetSessionState() {
   // enabled — executeApproveAndDelete() leaves it disabled and mid-spinner.
   renderFallbackNotice(null);
   applyFallbackGate(false);
-  clearPurgeError();
 
   if (elements.consentCheckbox) elements.consentCheckbox.checked = false;
   applyConsentState();
