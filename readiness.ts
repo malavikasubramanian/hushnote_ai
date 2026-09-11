@@ -97,20 +97,29 @@ function detectAlternateCodes(transcript: string) {
 }
 
 /**
- * The checklist line for a draft's evidence quotes: how many there are, and how
- * many carry a timestamp verifyEvidence() confirmed against the transcript. It
- * has to stay true at every count, including none confirmed, which is always
- * the case for a live recording.
+ * The checklist line for a draft's evidence quotes: how many there are, how
+ * many carry a timestamp verifyEvidence() confirmed against the transcript,
+ * and how many verifyQuote() could not mark verbatim or abridged. That last
+ * count says "unverified", matching the chip label, rather than "not found in
+ * the transcript" — a quote can also be unverified for being too short to
+ * count as evidence while still being right there in the transcript, and
+ * "not found" would be false for it. Has to stay true at every count,
+ * including none confirmed (always the case for a live recording) and none
+ * unverified (the common case) — a draft whose only evidence is unverified
+ * must not read the same as one that is fully backed.
  */
-function describeEvidence(total: number, confirmed: number) {
+function describeEvidence(total: number, confirmed: number, unverified: number) {
   const quotes = `${total} evidence quote${total === 1 ? '' : 's'} referenced`;
-  if (confirmed === 0) return `${quotes}, no timestamp confirmed against the transcript`;
-  if (confirmed === total) {
-    return total === 1
-      ? `${quotes}, its timestamp confirmed against the transcript`
-      : `${quotes}, all timestamps confirmed against the transcript`;
-  }
-  return `${quotes}, ${confirmed} with a timestamp confirmed against the transcript`;
+  const time = confirmed === 0
+    ? 'no timestamp confirmed against the transcript'
+    : confirmed === total
+      ? (total === 1 ? 'its timestamp confirmed against the transcript' : 'all timestamps confirmed against the transcript')
+      : `${confirmed} with a timestamp confirmed against the transcript`;
+  if (unverified === 0) return `${quotes}, ${time}`;
+  const status = unverified === total
+    ? (total === 1 ? 'unverified' : 'none verified')
+    : `${unverified} unverified`;
+  return `${quotes}, ${time}, ${status}`;
 }
 
 // Readiness evaluation logic based on purpose selection
@@ -130,6 +139,12 @@ export function calculateReadiness(
   // still set was confirmed against the transcript, and every other one is null.
   const evidenceCount = Array.isArray(evidence) ? evidence.length : 0;
   const confirmedCount = Array.isArray(evidence) ? evidence.filter((ev) => ev && ev.timestamp).length : 0;
+  // Anything but an explicit 'verbatim' or 'abridged' status is unverified — the
+  // same rule the review screen's chips use, so the checklist and the chips
+  // never disagree about a quote a caller sent through without verifyEvidence().
+  const unverifiedCount = Array.isArray(evidence)
+    ? evidence.filter((ev) => ev && ev.quoteStatus !== 'verbatim' && ev.quoteStatus !== 'abridged').length
+    : 0;
 
   if (purpose === 'progress') {
     // For progress tracking: ensure note has enough session content and at least
@@ -141,7 +156,7 @@ export function calculateReadiness(
     if (evidenceCount < 1) {
       missing.push('At least one evidence quote required');
     } else {
-      checksPassed.push(describeEvidence(evidenceCount, confirmedCount));
+      checksPassed.push(describeEvidence(evidenceCount, confirmedCount, unverifiedCount));
     }
 
     const completed = missing.length === 0;
@@ -174,7 +189,7 @@ export function calculateReadiness(
     if (hasDataOrSubjObj) passed.push('Subjective/objective clinical data documented');
     if (hasInterventionAndPlan) passed.push('Treatment plan & intervention documented');
     if (evidenceCount > 0) {
-      passed.push(describeEvidence(evidenceCount, confirmedCount));
+      passed.push(describeEvidence(evidenceCount, confirmedCount, unverifiedCount));
     }
     if (duration) {
       passed.push(`Session duration ${formatMinutes(duration.minutes)}, from ${duration.source}`);

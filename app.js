@@ -1219,7 +1219,7 @@ const ICON = {
 
 /** `size` is a Tailwind size-* step; `tone` a text-* colour utility. */
 function icon(name, size = 4, tone = '') {
-  return `<svg class="icon size-${size} ${tone}" viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
+  return `<svg class="icon size-${size} ${tone}" data-icon="${name}" viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
 }
 
 function escapeHtml(value) {
@@ -1569,19 +1569,53 @@ function hasQuoteText(ev) {
 }
 
 /**
- * One evidence chip. The clock icon and the time appear only with a real time;
- * without one the chip says so, since an icon alone would still imply a moment.
+ * How the server found an evidence quote in the transcript: 'verbatim',
+ * 'abridged' or 'unverified' (see verify-evidence.js). Anything else, including
+ * no status at all, is treated as unverified: the browser cannot check a quote
+ * itself, so it never presents one as found without the server saying so.
+ */
+function quoteStatus(ev) {
+  return ev.quoteStatus === 'verbatim' || ev.quoteStatus === 'abridged' ? ev.quoteStatus : 'unverified';
+}
+
+/**
+ * One evidence chip. Each quote status reads differently in shape and words,
+ * never colour alone, since passing off an edited or unfound quote as the
+ * client's exact words has clinical stakes:
+ *
+ * - verbatim: a solid pill, as before.
+ * - abridged: a dashed pill with an "abridged" tag, because what was left out
+ *   of the quote can change its meaning.
+ * - unverified: a squared-off chip with a warning icon and "unverified" in
+ *   place of a time; it never shows one.
+ *
+ * The clock icon and the time appear only with a real time; without one the
+ * chip says so, since an icon alone would still imply a moment.
  */
 function evidenceChip(ev) {
+  const status = quoteStatus(ev);
+  const quote = `<span class="truncate${status === 'unverified' ? ' text-ink-muted' : ''}" title="${escapeHtml(ev.quote)}">&ldquo;${escapeHtml(ev.quote)}&rdquo;</span>`;
+
+  if (status === 'unverified') {
+    return `
+          <span class="inline-flex max-w-full items-center gap-1.5 rounded-control border border-warn bg-warn-soft px-3 py-1.5 text-body-sm text-ink" data-quote-status="unverified">
+            ${icon('triangleAlert', 4, 'text-warn')}
+            <span class="shrink-0 font-semibold text-warn" title="Unverified: not found in the transcript as written, or too short to count as evidence. Check it against the session before relying on it.">unverified</span>
+            ${quote}
+          </span>`;
+  }
+
   const time = evidenceTime(ev.timestamp);
   const when = time
     ? `${icon('clock', 4, 'text-accent')}
             <span class="font-semibold tabular-nums text-accent">${escapeHtml(time)}</span>`
     : '<span class="shrink-0 italic text-ink-subtle">time not available</span>';
+  const abridged = status === 'abridged';
   return `
-          <span class="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-body-sm text-ink">
+          <span class="inline-flex max-w-full items-center gap-1.5 rounded-full border ${abridged ? 'border-dashed border-line-strong' : 'border-line'} bg-surface px-3 py-1.5 text-body-sm text-ink" data-quote-status="${status}">
             ${when}
-            <span class="truncate" title="${escapeHtml(ev.quote)}">&ldquo;${escapeHtml(ev.quote)}&rdquo;</span>
+            ${abridged ? '<span class="shrink-0 rounded-full border border-line-strong px-2 text-overline uppercase text-ink-muted" title="Abridged: shortened with “...” or [ ]. The words shown are in the transcript, but what was left out can change the meaning, so check the full passage.">abridged</span>' : ''}
+            ${quote}
           </span>`;
 }
 
@@ -1638,8 +1672,9 @@ function renderReviewScreen(data) {
       : 'inline-flex items-center rounded-full border border-line bg-warn-soft px-3 py-1 text-overline uppercase text-warn';
   }
 
-  // 3. Evidence chips — only items with quote text, and a time only where the
-  //    draft supplied a real one. Evidence that is not a list counts as none.
+  // 3. Evidence chips — only items with quote text. Each chip says whether its
+  //    quote was found verbatim, abridged or not at all, and shows a time only
+  //    where the draft supplied a real one. Evidence that is not a list counts as none.
   if (elements.evidenceChips) {
     const quotes = (Array.isArray(evidence) ? evidence : []).filter(hasQuoteText);
     elements.evidenceChips.innerHTML = quotes.length === 0

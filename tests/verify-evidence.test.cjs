@@ -1,13 +1,15 @@
 /**
- * Evidence timestamps confirmed against the transcript (verify-evidence.js).
+ * Evidence timestamps and quote statuses from the transcript (verify-evidence.js).
  *
  * The drafting model's timestamps are not evidence on their own: it can copy
  * the schema's placeholder, attach a real marker to the wrong quote, guess a
  * time mid-utterance, or invent one for a live recording that has no markers
- * at all. verifyEvidence() re-derives every time from the transcript's own
- * [MM:SS] line markers and drops whatever it cannot pin to one. The first cases
- * run against the app's own sample transcript, as the investigation did; the
- * rest cover live and mixed transcripts and malformed input.
+ * at all. verifyEvidence() locates each quote with the same matcher
+ * verifyQuote() uses, re-derives the time from the [MM:SS] marker of the line
+ * the quote starts on, and drops whatever it cannot pin to one. An abridged
+ * quote or one that runs across a speaker's lines gets a time too; an
+ * unverified quote never does. Quote statuses themselves are covered in
+ * verify-quote.test.cjs.
  */
 const fs = require('fs');
 const path = require('path');
@@ -16,6 +18,9 @@ const { verifyEvidence } = require('../verify-evidence.js');
 
 const SAMPLE = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8').match(/const sample = `([\s\S]*?)`;/)[1];
 const LIVE = 'The client says the week was really hard They tried the breathing exercise on Tuesday';
+const REPEATED = '[01:00] Client: I feel really stuck at work.\n[09:00] Therapist: What does stuck feel like?\n[12:30] Client: I feel really stuck at work again.';
+const SAME_SPEAKER = '[01:00] Client: I could not sleep at all last week.\n[01:20] Client: I kept waking up at three.';
+const BRACKET = '[18:15] Client: She gave me a good review last month.';
 
 /** The confirmed time verifyEvidence() gives a single evidence item. */
 const timeFor = (transcript, item) => verifyEvidence(transcript, [item])[0].timestamp;
@@ -49,14 +54,22 @@ module.exports = async function run() {
   console.log('\n  -- a quote that is not in the transcript gets no time');
   check('paraphrased quote', timeFor(SAMPLE, { timestamp: '09:30', quote: 'breathing brought her anxiety from 8 down to 6' }), null);
   check('schema placeholder copied', timeFor(SAMPLE, { timestamp: '00:00', quote: 'exact quote' }), null);
-  check('whole words only: "hope" is not in "hopeful"', timeFor(SAMPLE, { timestamp: '38:20', quote: 'hope' }), null);
+  check('whole words only: "a lot more hope" is not in "a lot more hopeful"', timeFor(SAMPLE, { timestamp: '38:20', quote: 'a lot more hope' }), null);
+  check('too short to count, even with a real marker', timeFor(SAMPLE, { timestamp: '16:00', quote: 'mind reading' }), null);
 
   console.log('\n  -- a quote on several lines keeps the model time only if it is one of their markers');
-  check('model time is the first match', timeFor(SAMPLE, { timestamp: '[14:20]', quote: 'mind reading' }), '14:20');
-  check('model time is the second match', timeFor(SAMPLE, { timestamp: '16:00', quote: 'mind reading' }), '16:00');
-  check('model time written h:mm:ss', timeFor(SAMPLE, { timestamp: '0:16:00', quote: 'mind reading' }), '16:00');
-  check('model time is a real marker, but not one of the matches', timeFor(SAMPLE, { timestamp: '03:15', quote: 'mind reading' }), null);
-  check('no model time to choose between them', timeFor(SAMPLE, { quote: 'mind reading' }), null);
+  check('model time is the first match', timeFor(REPEATED, { timestamp: '[01:00]', quote: 'I feel really stuck at work' }), '01:00');
+  check('model time is the second match', timeFor(REPEATED, { timestamp: '12:30', quote: 'I feel really stuck at work' }), '12:30');
+  check('model time written h:mm:ss', timeFor(REPEATED, { timestamp: '0:12:30', quote: 'I feel really stuck at work' }), '12:30');
+  check('model time is a real marker, but not one of the matches', timeFor(REPEATED, { timestamp: '09:00', quote: 'I feel really stuck at work' }), null);
+  check('no model time to choose between them', timeFor(REPEATED, { quote: 'I feel really stuck at work' }), null);
+
+  console.log('\n  -- edited and line-spanning quotes get a time too');
+  check('abridged quote takes its line marker',
+    timeFor(SAMPLE, { quote: 'I tried the 4-7-8 breathing on Tuesday ... my heart rate did slow down a little bit' }), '09:30');
+  check('bracketed quote takes its line marker', timeFor(BRACKET, { quote: '[My manager] gave me a good review last month' }), '18:15');
+  check('a quote across one speaker\'s two lines takes the first line\'s marker',
+    timeFor(SAME_SPEAKER, { timestamp: '01:20', quote: 'I could not sleep at all last week. I kept waking up at three.' }), '01:00');
 
   console.log('\n  -- a live recording has no markers, so no time is ever confirmed');
   check('live-only transcript, model claims 00:15', timeFor(LIVE, { timestamp: '00:15', quote: 'They tried the breathing exercise on Tuesday' }), null);
@@ -77,13 +90,26 @@ module.exports = async function run() {
   check('Windows line endings', timeFor('[00:00] Therapist: Hello.\r\n[05:00] Client: It was a hard week.\r\n', { quote: 'It was a hard week.' }), '05:00');
   check('indented marker line', timeFor('   [05:00] Client: It was a hard week.', { quote: 'It was a hard week.' }), '05:00');
   check('marker not at the start of the line', timeFor('Client [05:00]: It was a hard week.', { timestamp: '05:00', quote: 'It was a hard week.' }), null);
-  check('quote split across two lines', timeFor('[00:00] Therapist: Hello.\n[05:00] Client: It was a hard week.', { quote: 'Hello. It was a hard week.' }), null);
+  check('quote split across two speakers\' lines', timeFor('[00:00] Therapist: Hello.\n[05:00] Client: It was a hard week.', { quote: 'Hello. It was a hard week.' }), null);
+
+  console.log('\n  -- every item carries a quote status set here, not by the model');
+  check('verbatim, abridged and unverified side by side',
+    verifyEvidence(SAMPLE, [
+      { quote: 'Easily an 8 or a 9 out of 10.' },
+      { quote: 'I tried the 4-7-8 breathing on Tuesday ... my heart rate did slow down a little bit' },
+      { quote: 'I want to quit my job tomorrow' },
+    ]).map((ev) => ev.quoteStatus),
+    ['verbatim', 'abridged', 'unverified']);
+  check('a status supplied by the model is overwritten',
+    verifyEvidence(SAMPLE, [{ quote: 'I want to quit my job tomorrow', quoteStatus: 'verbatim', timestamp: '03:15' }]),
+    [{ quote: 'I want to quit my job tomorrow', quoteStatus: 'unverified', timestamp: null }]);
 
   console.log('\n  -- malformed evidence');
   check('item with no quote field is dropped', verifyEvidence(SAMPLE, [{ timestamp: '03:15' }]), []);
   check('blank quotes are dropped', verifyEvidence(SAMPLE, [{ timestamp: '03:15', quote: '' }, { timestamp: '03:15', quote: '   ' }]), []);
   check('non-string quotes are dropped', verifyEvidence(SAMPLE, [{ quote: 42 }, { quote: null }, { quote: { text: 'hi' } }]), []);
-  check('punctuation-only quote is kept, with no time', verifyEvidence(SAMPLE, [{ quote: '...', timestamp: '03:15' }]), [{ quote: '...', timestamp: null }]);
+  check('punctuation-only quote is kept, unverified and with no time',
+    verifyEvidence(SAMPLE, [{ quote: '...', timestamp: '03:15' }]), [{ quote: '...', timestamp: null, quoteStatus: 'unverified' }]);
   check('only real quotes survive a mixed list',
     verifyEvidence(SAMPLE, [{ timestamp: '03:15' }, { quote: 'Easily an 8 or a 9 out of 10.' }, { quote: '' }]).map((ev) => ev.quote),
     ['Easily an 8 or a 9 out of 10.']);
