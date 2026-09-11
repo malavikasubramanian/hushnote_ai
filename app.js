@@ -169,8 +169,9 @@ function bindEventListeners() {
   // 3. Confirm Consent Button
   if (elements.confirmConsentBtn) {
     elements.confirmConsentBtn.addEventListener('click', () => {
+      // The button stays disabled until consent is given (applyConsentState), so
+      // this is a guard, not a prompt: a session never starts without consent.
       if (!state.consentGiven && elements.consentCheckbox && !elements.consentCheckbox.checked) {
-        alert('Please confirm client consent to proceed.');
         return;
       }
       showScreen('recording-screen');
