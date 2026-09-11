@@ -1,5 +1,6 @@
 # HushNote
 > Privacy-First Local-First AI Note Drafting Assistant for Therapists
+>
 > Built at Build with Gemma NYC: On-Device AI for Healthcare | On-Device Private Health Tools track | August 2026
 
 HushNote is a local-first, privacy-focused clinical note drafting prototype designed to help mental health professionals draft structured DAP and SOAP notes from session audio snippets without compromising client confidentiality or storing raw audio data permanently.
