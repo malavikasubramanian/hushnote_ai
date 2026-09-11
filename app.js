@@ -1545,6 +1545,37 @@ function renderUnavailableReview() {
 }
 
 /**
+ * The time an evidence quote was said, if the draft actually supplied one.
+ *
+ * Returns null unless the value reads as a clock time ("01:30", "1:02:03", or
+ * bracketed as the transcript writes it). A missing, blank or prose value is
+ * never filled in: this used to show "00:15" for any quote without a time,
+ * presenting an invented moment exactly like a real one.
+ */
+function evidenceTime(value) {
+  if (typeof value !== 'string') return null;
+  const match = value.trim().match(/^\[?(\d{1,2}:[0-5]\d(?::[0-5]\d)?)\]?$/);
+  return match ? match[1] : null;
+}
+
+/**
+ * One evidence chip. The clock icon and the time appear only with a real time;
+ * without one the chip says so, since an icon alone would still imply a moment.
+ */
+function evidenceChip(ev) {
+  const time = evidenceTime(ev.timestamp);
+  const when = time
+    ? `${icon('clock', 4, 'text-accent')}
+            <span class="font-semibold tabular-nums text-accent">${escapeHtml(time)}</span>`
+    : '<span class="shrink-0 italic text-ink-subtle">time not available</span>';
+  return `
+          <span class="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-body-sm text-ink">
+            ${when}
+            <span class="truncate" title="${escapeHtml(ev.quote)}">&ldquo;${escapeHtml(ev.quote)}&rdquo;</span>
+          </span>`;
+}
+
+/**
  * Render Review Screen with editable note fields, readiness check, and evidence chips
  */
 function renderReviewScreen(data) {
@@ -1597,16 +1628,11 @@ function renderReviewScreen(data) {
       : 'inline-flex items-center rounded-full border border-line bg-warn-soft px-3 py-1 text-overline uppercase text-warn';
   }
 
-  // 3. Timestamped evidence chips
+  // 3. Evidence chips — a time only where the draft supplied a real one.
   if (elements.evidenceChips) {
     elements.evidenceChips.innerHTML = evidence.length === 0
       ? '<p class="font-display text-body-sm italic text-ink-subtle">No explicit timestamp quotes referenced.</p>'
-      : evidence.map(ev => `
-          <span class="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-body-sm text-ink">
-            ${icon('clock', 4, 'text-accent')}
-            <span class="font-semibold tabular-nums text-accent">${escapeHtml(ev.timestamp || '00:15')}</span>
-            <span class="truncate" title="${escapeHtml(ev.quote)}">&ldquo;${escapeHtml(ev.quote)}&rdquo;</span>
-          </span>`).join('');
+      : evidence.map(evidenceChip).join('');
   }
 
   /*
