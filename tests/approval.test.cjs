@@ -65,11 +65,55 @@ module.exports = async function run() {
   const { check, results } = createChecker('approval');
 
   let calls;
-  const { window, App, $ } = boot({ beforeLoad: (w) => { calls = stubApi(w); } });
+  const mediaCalls = [];
+  const { window, App, $ } = boot({ beforeLoad: (w) => {
+    calls = stubApi(w);
+    // jsdom has no media playback; record what the wipe asks of the player.
+    w.HTMLMediaElement.prototype.load = function load() { mediaCalls.push('load'); };
+    w.HTMLMediaElement.prototype.pause = function pause() { mediaCalls.push('pause'); };
+  } });
   const alerts = [];
   window.alert = (message) => { alerts.push(message); };
 
-  App.state.transcript = SESSION;
+  /** Every browser-side copy a recorded session leaves behind. */
+  function seedSessionCopies() {
+    App.state.transcript = SESSION;
+    App.state.baseTranscript = SESSION;
+    App.state.speechTranscriptBuffer = 'Client: That helped, thank you.';
+    $('transcriptInput').value = SESSION;
+    App.state.audioChunks = [new window.Blob(['recorded audio'])];
+    App.state.audioUrl = 'blob:test/session-audio';
+    $('audioPlayback').src = App.state.audioUrl;
+    $('audioPlayback').hidden = false;
+  }
+
+  const rawCopies = () => ({
+    transcript: App.state.transcript,
+    baseTranscript: App.state.baseTranscript,
+    speechTranscriptBuffer: App.state.speechTranscriptBuffer,
+    textarea: $('transcriptInput').value,
+    generatedNoteResponse: App.state.generatedNoteResponse,
+    noteOriginals: App.state.noteOriginals,
+    noteEdits: App.state.noteEdits,
+    audioChunks: App.state.audioChunks.length,
+    audioUrl: App.state.audioUrl,
+    playerSrc: $('audioPlayback').getAttribute('src'),
+    playerHidden: $('audioPlayback').hidden,
+  });
+  const NO_RAW_COPIES = {
+    transcript: '', baseTranscript: '', speechTranscriptBuffer: '', textarea: '',
+    generatedNoteResponse: null, noteOriginals: {}, noteEdits: {},
+    audioChunks: 0, audioUrl: null, playerSrc: null, playerHidden: true,
+  };
+
+  const reviewPanels = () => ({
+    noteBody: $('noteBody').innerHTML.trim(),
+    evidenceChips: $('evidenceChips').innerHTML.trim(),
+    missingFields: $('missingFields').innerHTML.trim(),
+  });
+  const EMPTY_PANELS = { noteBody: '', evidenceChips: '', missingFields: '' };
+
+  seedSessionCopies();
   App.state.recordingSeconds = 2700;
   App.state.selectedFormat = 'DAP';
   App.state.selectedPurpose = 'billing_insurance';
@@ -91,7 +135,12 @@ module.exports = async function run() {
   check('correction differs from the draft', $('note-data').value !== DRAFTED_DATA, true);
 
   console.log('\n  -- approving keeps the correction, not the draft');
-  await App.executeApproveAndDelete();
+  const mediaMark = mediaCalls.length;
+  const approving = App.executeApproveAndDelete();
+  // Raw copies go at once; the review panels stay until the success screen covers them.
+  check('raw copies cleared as soon as approve is pressed', rawCopies(), NO_RAW_COPIES);
+  check('review panels still showing behind the spinner', $('evidenceChips').textContent.includes('It has been a difficult week.'), true);
+  await approving;
   await wait(900);
 
   check('approved note captured', !!App.state.approvedNote, true);
@@ -101,9 +150,11 @@ module.exports = async function run() {
 
   console.log('\n  -- the raw session is purged from the client');
   check('purge endpoint called', calls.some((c) => c.url.includes('/api/delete-raw-session')), true);
-  check('transcript cleared', App.state.transcript, '');
-  check('audio chunks cleared', App.state.audioChunks, []);
+  check('every raw copy cleared', rawCopies(), NO_RAW_COPIES);
+  check('player paused, then unloaded', mediaCalls.slice(mediaMark), ['pause', 'load']);
+  check('review panels emptied once the success screen is up', reviewPanels(), EMPTY_PANELS);
   check('consent cleared for the next session', App.state.consentGiven, false);
+  check('the export still carries the edited note', App.formatApprovedNoteText().includes(CORRECTION), true);
 
   /*
    * The server keeps nothing, so a failed wipe call can only mean the event went
@@ -114,7 +165,7 @@ module.exports = async function run() {
 
   async function sessionEndingWith(wipeReply, { fallback = false } = {}) {
     App.resetSessionState();
-    App.state.transcript = SESSION;
+    seedSessionCopies();
     App.state.recordingSeconds = 2700;
     App.state.selectedFormat = 'DAP';
     wipeCalls = 0;
@@ -153,8 +204,8 @@ module.exports = async function run() {
     check('the wipe call was still made', wipeCalls, 1);
     check('reaches the success screen', App.state.currentScreen, 'success-screen');
     check('the edited note is kept', App.state.approvedNote && App.state.approvedNote.data, [CORRECTION]);
-    check('transcript cleared', App.state.transcript, '');
-    check('audio chunks cleared', App.state.audioChunks, []);
+    check('every raw copy cleared', rawCopies(), NO_RAW_COPIES);
+    check('review panels emptied', reviewPanels(), EMPTY_PANELS);
     check('consent cleared', App.state.consentGiven, false);
   }
 
@@ -164,7 +215,8 @@ module.exports = async function run() {
   check('reaches the success screen', App.state.currentScreen, 'success-screen');
   check('says nothing was kept', $('success-title').textContent.trim(), 'Nothing was kept');
   check('no note kept', App.state.approvedNote, null);
-  check('transcript cleared', App.state.transcript, '');
+  check('every raw copy cleared', rawCopies(), NO_RAW_COPIES);
+  check('review panels emptied', reviewPanels(), EMPTY_PANELS);
 
   console.log('\n  -- a failed wipe call is never framed as exposed data');
   check('no wipe-failure panel on the review screen', $('purgeError'), null);

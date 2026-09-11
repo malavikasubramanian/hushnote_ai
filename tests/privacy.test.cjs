@@ -51,6 +51,33 @@ function stubApi(window) {
   };
 }
 
+/**
+ * A recorder that behaves like Chrome's when started without a timeslice:
+ * stop() returns at once, and the whole recording arrives afterwards — first as
+ * dataavailable, then stop. Verified against headless Chrome 153. Counts object
+ * URLs, so a test can tell whether playback was rebuilt from late audio.
+ */
+function installLateRecorder(window) {
+  const ctl = { objectUrls: 0 };
+  window.navigator.mediaDevices = {
+    getUserMedia: () => Promise.resolve({ getTracks: () => [{ kind: 'audio', stop() {} }] }),
+  };
+  window.MediaRecorder = class {
+    constructor(stream) { this.stream = stream; this.state = 'inactive'; }
+    start() { this.state = 'recording'; }
+    stop() {
+      this.state = 'inactive';
+      setTimeout(() => {
+        if (this.ondataavailable) this.ondataavailable({ data: new window.Blob(['the whole recording']) });
+        if (this.onstop) this.onstop();
+      }, 0);
+    }
+  };
+  const createObjectURL = window.URL.createObjectURL;
+  window.URL.createObjectURL = (blob) => { ctl.objectUrls += 1; return createObjectURL(blob); };
+  return ctl;
+}
+
 module.exports = async function run() {
   const { check, results } = createChecker('privacy');
 
@@ -153,6 +180,47 @@ module.exports = async function run() {
   check('the failure is logged', /Wipe event not recorded/.test(failedWipeLogs), true);
   check('the failure log carries no transcript', failedWipeLogs.includes('That helped, thank you'), false);
   check('the failure log carries no note text', failedWipeLogs.includes('Client denied chest pain.'), false);
+
+  console.log('\n  -- reset empties the review panels and the player straight away');
+  App.resetSessionState();
+  App.state.transcript = TRANSCRIPT;
+  App.state.selectedFormat = 'DAP';
+  await App.executeNoteGeneration();
+  await wait(1600);
+  App.state.audioUrl = 'blob:test/session-audio';
+  $('audioPlayback').src = App.state.audioUrl;
+  $('audioPlayback').hidden = false;
+  check('the draft is on the review screen first', $('evidenceChips').textContent.includes('It has been a difficult week.'), true);
+  App.resetSessionState();
+  check('note text gone from the page', $('noteBody').innerHTML.trim(), '');
+  check('evidence quotes gone from the page', $('evidenceChips').innerHTML.trim(), '');
+  check('session details gone from the page', $('missingFields').innerHTML.trim(), '');
+  check('player detached', $('audioPlayback').getAttribute('src'), null);
+  check('player hidden', $('audioPlayback').hidden, true);
+
+  console.log('\n  -- resetting mid-recording does not bring the recording back');
+  const recorder = installLateRecorder(window);
+  await App.startAudioRecording();
+  check('recording is live', App.state.isRecording, true);
+  const urlsBeforeReset = recorder.objectUrls;
+  App.resetSessionState();
+  await wait(50); // let the recorder's late data and stop event arrive
+  check('no audio came back into state', App.state.audioChunks.length, 0);
+  check('no audio URL was rebuilt', recorder.objectUrls, urlsBeforeReset);
+  check('state holds no audio URL', App.state.audioUrl, null);
+  check('player not re-attached', $('audioPlayback').getAttribute('src'), null);
+  check('player still hidden', $('audioPlayback').hidden, true);
+
+  console.log("\n  -- a new recording does not inherit a stale recorder's audio");
+  await App.startAudioRecording();
+  const urlsBeforeRestart = recorder.objectUrls;
+  await App.startAudioRecording();
+  await wait(50);
+  check('the new recording starts with no audio', App.state.audioChunks.length, 0);
+  check('no audio URL built from the stale recorder', recorder.objectUrls, urlsBeforeRestart);
+  check('player not attached to the stale recording', $('audioPlayback').getAttribute('src'), null);
+  App.resetSessionState();
+  await wait(50);
 
   window.close();
   return results;
