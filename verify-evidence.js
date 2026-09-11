@@ -80,10 +80,17 @@ function confirmedTime(lines, item) {
   return hit ? hit.marker : null;
 }
 
+/** An evidence object whose quote is non-blank text. */
+function hasQuoteText(item) {
+  return !!item && typeof item === 'object' && !Array.isArray(item)
+    && typeof item.quote === 'string' && item.quote.trim() !== '';
+}
+
 /**
  * Returns the evidence with every timestamp replaced by one confirmed against
- * the transcript, or null. Other fields are kept; the input is not modified;
- * anything that is not an evidence object is dropped.
+ * the transcript, or null. Other fields are kept and the input is not modified.
+ * Anything that is not an evidence object, or has no quote text, is dropped:
+ * without a quote there is no evidence to show or to count toward readiness.
  *
  * @param {string} transcript The exact transcript the model was given.
  * @param {unknown} evidence The model's evidence array.
@@ -93,6 +100,6 @@ export function verifyEvidence(transcript, evidence) {
   if (!Array.isArray(evidence)) return [];
   const lines = transcriptLines(transcript);
   return evidence
-    .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+    .filter(hasQuoteText)
     .map((item) => ({ ...item, timestamp: confirmedTime(lines, item) }));
 }

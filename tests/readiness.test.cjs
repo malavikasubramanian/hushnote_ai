@@ -53,6 +53,14 @@ module.exports = async function run() {
   check('says a quote is needed', none.missing, ['At least one evidence quote required']);
   check('no evidence line in the checklist', none.checksPassed, []);
 
+  console.log('\n  -- evidence items with no quote text do not count as quotes');
+  const quoteless = readinessFor('progress', TIMED, [{ timestamp: '05:00' }, { quote: '', timestamp: '09:30' }, { quote: null }]);
+  check('quote-less items alone leave the draft incomplete', quoteless.completed, false);
+  check('and still say a quote is needed', quoteless.missing, ['At least one evidence quote required']);
+  check('a real quote alongside them is counted alone',
+    readinessFor('progress', TIMED, [{ timestamp: '05:00' }, QUOTES[0], { quote: '   ' }]).checksPassed,
+    ['1 evidence quote referenced, its timestamp confirmed against the transcript']);
+
   console.log('\n  -- billing reports the same line');
   const billingLive = readinessFor('billing_insurance', LIVE, QUOTES);
   check('live-only billing lists quotes with no confirmed time',

@@ -80,9 +80,13 @@ module.exports = async function run() {
   check('quote split across two lines', timeFor('[00:00] Therapist: Hello.\n[05:00] Client: It was a hard week.', { quote: 'Hello. It was a hard week.' }), null);
 
   console.log('\n  -- malformed evidence');
-  check('missing quote', timeFor(SAMPLE, { timestamp: '03:15' }), null);
-  check('empty quote', timeFor(SAMPLE, { timestamp: '03:15', quote: '   ' }), null);
-  check('non-string quote', timeFor(SAMPLE, { timestamp: '03:15', quote: 42 }), null);
+  check('item with no quote field is dropped', verifyEvidence(SAMPLE, [{ timestamp: '03:15' }]), []);
+  check('blank quotes are dropped', verifyEvidence(SAMPLE, [{ timestamp: '03:15', quote: '' }, { timestamp: '03:15', quote: '   ' }]), []);
+  check('non-string quotes are dropped', verifyEvidence(SAMPLE, [{ quote: 42 }, { quote: null }, { quote: { text: 'hi' } }]), []);
+  check('punctuation-only quote is kept, with no time', verifyEvidence(SAMPLE, [{ quote: '...', timestamp: '03:15' }]), [{ quote: '...', timestamp: null }]);
+  check('only real quotes survive a mixed list',
+    verifyEvidence(SAMPLE, [{ timestamp: '03:15' }, { quote: 'Easily an 8 or a 9 out of 10.' }, { quote: '' }]).map((ev) => ev.quote),
+    ['Easily an 8 or a 9 out of 10.']);
   check('evidence that is not an array', [null, undefined, {}, 'x'].map((e) => verifyEvidence(SAMPLE, e)), [[], [], [], []]);
   check('non-object items are dropped', verifyEvidence(SAMPLE, [null, 'x', 3, [], { quote: 'Easily an 8 or a 9 out of 10.' }]).length, 1);
 

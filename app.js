@@ -1559,6 +1559,16 @@ function evidenceTime(value) {
 }
 
 /**
+ * Whether an evidence item has quote text to show. The quote is the evidence,
+ * so without one a chip has nothing to say and the item gets no chip at all,
+ * rather than one reading "undefined", "null" or "[object Object]". A missing
+ * time is different: a real quote can still say "time not available".
+ */
+function hasQuoteText(ev) {
+  return !!ev && typeof ev === 'object' && typeof ev.quote === 'string' && ev.quote.trim() !== '';
+}
+
+/**
  * One evidence chip. The clock icon and the time appear only with a real time;
  * without one the chip says so, since an icon alone would still imply a moment.
  */
@@ -1628,11 +1638,13 @@ function renderReviewScreen(data) {
       : 'inline-flex items-center rounded-full border border-line bg-warn-soft px-3 py-1 text-overline uppercase text-warn';
   }
 
-  // 3. Evidence chips — a time only where the draft supplied a real one.
+  // 3. Evidence chips — only items with quote text, and a time only where the
+  //    draft supplied a real one. Evidence that is not a list counts as none.
   if (elements.evidenceChips) {
-    elements.evidenceChips.innerHTML = evidence.length === 0
+    const quotes = (Array.isArray(evidence) ? evidence : []).filter(hasQuoteText);
+    elements.evidenceChips.innerHTML = quotes.length === 0
       ? '<p class="font-display text-body-sm italic text-ink-subtle">No explicit timestamp quotes referenced.</p>'
-      : evidence.map(evidenceChip).join('');
+      : quotes.map(evidenceChip).join('');
   }
 
   /*
