@@ -9,7 +9,7 @@ HushNote is a local-first, privacy-focused clinical note drafting prototype desi
 
 - **Local-First LLM Processing**: Interacts directly with a local **Ollama** instance running Gemma (`gemma4` by default; override with `OLLAMA_MODEL`).
 - **Zero Raw Data Retention**: Audio never leaves the browser. The transcript reaches the local server only for the length of a drafting request and is **not kept there**; the browser's own copy of the audio and transcript is cleared when the note is approved or the session is discarded.
-- **Timestamped Evidence Quotes**: Links specific transcript quotes with exact time markers (`00:12`, `00:41`) to ground generated notes in factual session evidence.
+- **Timestamped Evidence Quotes**: Grounds generated notes in quotes from the session transcript. A quote's time comes from the transcript's own `[MM:SS]` markers and is shown only when the quote can be matched to one; otherwise its chip says "time not available". Live recordings have no markers, so quotes from them never carry a time.
 - **Adaptive Purpose Readiness**:
   - **Progress Tracking**: Validates therapeutic outcomes and linked evidence quotes.
   - **Billing-Ready**: Ensures duration verification, intervention notes, and treatment plan updates.
@@ -18,9 +18,17 @@ HushNote is a local-first, privacy-focused clinical note drafting prototype desi
 
 ---
 
+## Built to Deserve "Privacy-First"
+
+The privacy claims above aren't just a description, they're the result of an actual audit. Early builds of HushNote made several claims that weren't quite true: a fallback note that looked like real model output but wasn't, a billing code derived from the length of the generated note instead of the actual session duration, edits a clinician made on the review screen that got discarded before approval, and a raw transcript the server kept in memory well after a session was reset or discarded, sometimes indefinitely.
+
+Each of those got found and fixed, with the fix verified against the actual failure, not just assumed correct. The server no longer stores the transcript at all, once it became clear nothing in the code ever read it back, so there's nothing left to leak. `clearRawSessionData()` and `clearReviewPanels()` together clear every copy of a session: transcript, audio, draft, and the review screen's own rendered text, on approve, discard, or reset, closing a real bug where a discarded recording could reappear, fully playable, after starting a new session. Evidence timestamps are checked against the transcript's own markers rather than trusted from the model, so a quote never shows a time that isn't actually in the session, including live recordings, which have no timestamps to fabricate from in the first place.
+
+---
+
 ## Prerequisites
 
-1. **Node.js**: v18.0.0 or later
+1. **Node.js**: 22.22.2 or later on the 22.x line, 24.15 or later on 24.x, or 26+. The test suite needs this range (it is jsdom 30's supported range, and the tests load ES modules with plain `require()`). Running the app alone (`npm run dev`) needs 20.19+ or 22.12+, per `@vitejs/plugin-react`.
 2. **Ollama**: Download and install from [Ollama.com](https://ollama.com)
 3. **Gemma Model**:
    ```bash
@@ -64,6 +72,13 @@ HushNote is a local-first, privacy-focused clinical note drafting prototype desi
    ```
    Open your browser to `http://localhost:3000`.
 
+5. **Run the Tests and Type Check**:
+   ```bash
+   npm test
+   npm run lint
+   ```
+   `npm test` runs every suite in `tests/` (the jsdom UI suites, plus unit tests for `verify-evidence.js` and `readiness.ts`) and needs neither the server nor a model. `npm run lint` runs `tsc --noEmit`.
+
 ---
 
 ## Connecting Google Stitch Exported HTML/CSS to `app.js`
@@ -82,19 +97,19 @@ HushNote is a local-first, privacy-focused clinical note drafting prototype desi
 | Hero "Start Session" Button | `startSessionBtn` | Transitions from landing screen to consent modal |
 | Informed Consent Checkbox | `consentCheckbox` | Confirms client recording consent |
 | Confirm Consent Button | `confirmConsentBtn` | Enables when consent is checked & opens recorder |
-| Start Recording Button | `startRecordingBtn` | Starts browser microphone audio snippet recording |
+| Start Recording Button | `startRecordingBtn` | Retry button, shown only after the microphone fails; recording starts on its own once consent is confirmed |
 | Stop Recording Button | `stopRecordingBtn` | Stops recording & opens format selection |
 | Transcript Textarea / Input | `transcriptInput` | Displays live transcript or allows manual pasting |
 | Audio Playback Tag | `audioPlayback` | `<audio>` tag playing temporary memory blob |
 | Recording Timer Counter | `recordingTimer` | Displays live recording counter (`00:45`) |
-| Format Options Container | `noteFormat` | DAP / SOAP / BOTH card selection |
-| Generate Progress Note Button | `generateNoteBtn` | Triggers POST `/api/generate-note` |
-| Purpose Selection Form | `purpose-form` | Selects Progress / Billing / Insurance readiness |
+| Format Options Container | `noteFormat` | Wraps the DAP / SOAP / BOTH cards; `app.js` reads the `note-format` radios inside it, not this `id` |
+| Generate Progress Note Button | `generateNoteBtn` | Opens purpose selection |
+| Purpose Selection Form | `purpose-form` | Selects Progress Tracking or Billing & Insurance readiness; submitting it triggers POST `/api/generate-note` |
 | Draft Note Text Area | `noteBody` | Editable DAP / SOAP note sections |
 | Readiness Status Badge | `readinessLabel` | Displays readiness state ("Ready for therapist review") |
 | Missing Fields Checklist | `missingFields` | Renders missing clinical fields checklist |
-| Evidence Timestamps Container | `evidenceChips` | Displays timestamped quote tags (`00:12`) |
-| Approve & Delete Raw Data Button | `approveDeleteBtn` | Calls POST `/api/delete-raw-session`, then clears the audio and transcript from browser memory |
+| Evidence Timestamps Container | `evidenceChips` | Displays evidence quote chips, with a time only where one was confirmed against the transcript |
+| Approve & Delete Raw Data Button | `approveDeleteBtn` | Clears the audio, transcript and draft from browser memory, keeping the approved note, and calls POST `/api/delete-raw-session` for the audit log (the wipe does not wait on it) |
 
 ---
 
@@ -102,13 +117,22 @@ HushNote is a local-first, privacy-focused clinical note drafting prototype desi
 
 ```
 .
-├── server.ts             # Express backend with Ollama integration & fallback engine
-├── server.js             # Standalone Express runner export
+├── server.ts             # Express backend: drafts notes with local Ollama, keeps no session data
+├── readiness.ts          # Readiness report and time-based CPT suggestion (no I/O, unit tested)
+├── verify-evidence.js    # Confirms evidence timestamps against the transcript's own markers
 ├── app.js                # Plain JS state machine & Stitch DOM event wiring
-├── index.html            # Main UI container holding 7 Stitch-exported screens
+├── index.html            # Main UI container holding 8 Stitch-exported screens (app.js also accepts a legacy landing-screen id)
+├── src/
+│   ├── index.css         # Tailwind v4 theme and styles, loaded by index.html
+│   ├── main.tsx          # Unused React scaffold (not loaded by index.html)
+│   └── App.tsx           # Unused React scaffold
+├── tests/                # jsdom UI suites and unit tests, run with npm test
+├── vite.config.ts        # Vite dev server configuration
+├── tsconfig.json         # TypeScript settings used by npm run lint
 ├── .env.example          # Sample environment variables
 ├── metadata.json         # AI Studio applet configuration
 ├── package.json          # Node.js dependencies & full-stack build scripts
+├── CLAUDE.md             # Git branching and pull request conventions for this repo
 └── README.md             # Project documentation & integration guide
 ```
 
