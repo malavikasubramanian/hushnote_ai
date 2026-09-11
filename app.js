@@ -1534,6 +1534,8 @@ function renderReviewScreen(data) {
   // 0. Provenance first — everything below is only trustworthy if a model ran.
   renderFallbackNotice(data);
   applyFallbackGate(data.fallback);
+  // A wipe failure belongs to the draft it was raised on, not to this one.
+  clearPurgeError();
 
   if (data.fallback) {
     renderUnavailableReview();
@@ -1699,6 +1701,19 @@ function renderReviewScreen(data) {
   }
 }
 
+/** The review screen's wipe-failure panel. Only ever describes the latest attempt. */
+function showPurgeError(message) {
+  const panel = document.getElementById('purgeError');
+  const text = document.getElementById('purgeErrorText');
+  if (text) text.textContent = message;
+  if (panel) panel.hidden = false;
+}
+
+function clearPurgeError() {
+  const panel = document.getElementById('purgeError');
+  if (panel) panel.hidden = true;
+}
+
 /**
  * Approve Note & Purge Raw Data
  */
@@ -1717,6 +1732,8 @@ async function executeApproveAndDelete() {
     return;
   }
 
+  clearPurgeError();
+
   if (elements.approveDeleteBtn) {
     elements.approveDeleteBtn.disabled = true;
     elements.approveDeleteBtn.innerHTML =
@@ -1732,6 +1749,12 @@ async function executeApproveAndDelete() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId: 'active' })
     });
+
+    // An error status is a failed wipe. Reading it as success would put
+    // "Everything else is gone" on screen while the server may still hold it all.
+    if (!response.ok) {
+      throw new Error(`Server returned status ${response.status}`);
+    }
 
     const resData = await response.json();
     console.log('[HushNote Client] Raw session purged response:', resData);
@@ -1767,7 +1790,11 @@ async function executeApproveAndDelete() {
 
   } catch (error) {
     console.error('[HushNote Client] Error purging raw session:', error);
-    alert('Failed to delete raw session data from backend server.');
+    // Every failure lands here before anything is captured or cleared, so the
+    // note, transcript and audio are all still held. The message says exactly that.
+    showPurgeError(
+      `The wipe request failed: ${error.message}. Nothing has been cleared${discardOnly ? '' : ' and your edits are still here'}. Check that the HushNote server is running, then try again.`
+    );
     if (elements.approveDeleteBtn) {
       elements.approveDeleteBtn.disabled = false;
       elements.approveDeleteBtn.innerHTML = discardOnly ? DISCARD_HTML : APPROVE_HTML;
@@ -1812,6 +1839,7 @@ function resetSessionState() {
   // enabled — executeApproveAndDelete() leaves it disabled and mid-spinner.
   renderFallbackNotice(null);
   applyFallbackGate(false);
+  clearPurgeError();
 
   if (elements.consentCheckbox) elements.consentCheckbox.checked = false;
   applyConsentState();
