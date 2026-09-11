@@ -8,7 +8,7 @@ HushNote is a local-first, privacy-focused clinical note drafting prototype desi
 ## Key Features & Privacy Architecture
 
 - **Local-First LLM Processing**: Interacts directly with a local **Ollama** instance running Gemma (`gemma4` by default; override with `OLLAMA_MODEL`).
-- **Zero Raw Data Retention**: Raw audio snippets and transcripts reside solely in temporary client/server memory buffers and are **permanently purged** immediately upon note approval.
+- **Zero Raw Data Retention**: Audio never leaves the browser. The transcript reaches the local server only for the length of a drafting request and is **not kept there**; the browser's own copy of the audio and transcript is cleared when the note is approved or the session is discarded.
 - **Timestamped Evidence Quotes**: Links specific transcript quotes with exact time markers (`00:12`, `00:41`) to ground generated notes in factual session evidence.
 - **Adaptive Purpose Readiness**:
   - **Progress Tracking**: Validates therapeutic outcomes and linked evidence quotes.
@@ -94,7 +94,7 @@ HushNote is a local-first, privacy-focused clinical note drafting prototype desi
 | Readiness Status Badge | `readinessLabel` | Displays readiness state ("Ready for therapist review") |
 | Missing Fields Checklist | `missingFields` | Renders missing clinical fields checklist |
 | Evidence Timestamps Container | `evidenceChips` | Displays timestamped quote tags (`00:12`) |
-| Approve & Delete Raw Data Button | `approveDeleteBtn` | Calls POST `/api/delete-raw-session` & purges memory |
+| Approve & Delete Raw Data Button | `approveDeleteBtn` | Calls POST `/api/delete-raw-session`, then clears the audio and transcript from browser memory |
 
 ---
 
@@ -118,7 +118,7 @@ HushNote is a local-first, privacy-focused clinical note drafting prototype desi
 
 For production healthcare deployment:
 
-1. **Encryption-at-Rest**: Implement AES-256-GCM encryption for temporary session buffers in `server.ts`.
+1. **Encryption-at-Rest**: `server.ts` holds no session data today. Any future server-side storage of transcripts or audio needs AES-256-GCM encryption at rest and TTL purging before it ships.
 2. **Authentication & Access Control**: Integrate OAuth2 / SAML single-sign-on (SSO) with role-based access control (RBAC).
 3. **Audit Logging**: Emit append-only, tamper-evident audit trail events in `POST /api/delete-raw-session`.
 4. **BAA Execution**: Execute Business Associate Agreements (BAA) with all cloud hosting providers.

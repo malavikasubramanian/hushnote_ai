@@ -9,8 +9,9 @@
  *
  * The API is stubbed rather than reached over the network, so the suite runs
  * without a server or a model. What it asserts is client behaviour: which text
- * survives approval, and what is cleared afterwards. The server's own purge is
- * covered by server-side behaviour, not here.
+ * survives approval, and what is cleared afterwards. The server holds no session
+ * data, so there is nothing server-side to purge; the endpoint is stubbed only
+ * so the wipe flow runs.
  */
 const { boot, fire, wait, createChecker } = require('./harness.cjs');
 

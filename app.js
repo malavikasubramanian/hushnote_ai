@@ -1340,9 +1340,9 @@ function renderFallbackNotice(data) {
 
 /**
  * In fallback mode there is nothing to approve, so the primary action changes
- * identity rather than being disabled outright: POST /api/delete-raw-session is
- * the only path that clears activeRawSession on the server, and blocking it
- * would strand the raw transcript in memory — the opposite of the promise.
+ * identity rather than being disabled outright: the clinician still needs a way
+ * to clear the audio and transcript from this tab, and a disabled button would
+ * leave them sitting in memory — the opposite of the promise.
  */
 function applyFallbackGate(isFallback) {
   state.isFallback = Boolean(isFallback);
@@ -1750,8 +1750,8 @@ async function executeApproveAndDelete() {
       body: JSON.stringify({ sessionId: 'active' })
     });
 
-    // An error status is a failed wipe. Reading it as success would put
-    // "Everything else is gone" on screen while the server may still hold it all.
+    // An error status is a failed request, not a confirmed wipe, so the flow
+    // stops here and says so rather than guessing what the server did.
     if (!response.ok) {
       throw new Error(`Server returned status ${response.status}`);
     }
