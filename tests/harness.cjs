@@ -47,6 +47,12 @@ function boot(options = {}) {
   window.scrollTo = () => {};
   window.URL.createObjectURL = () => 'blob:test/object';
   window.URL.revokeObjectURL = () => {};
+  // jsdom has no media playback: load(), pause() and play() only print "Not
+  // implemented". Silent stand-ins keep suite output clean; a suite that cares
+  // what the player was asked to do overrides them in beforeLoad.
+  window.HTMLMediaElement.prototype.load = () => {};
+  window.HTMLMediaElement.prototype.pause = () => {};
+  window.HTMLMediaElement.prototype.play = () => Promise.resolve();
 
   if (options.beforeLoad) options.beforeLoad(window);
 

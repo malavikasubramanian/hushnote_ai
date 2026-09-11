@@ -952,9 +952,28 @@ function teardownRecording() {
   state.speechRestarts = 0;
 }
 
-async function startAudioRecording() {
-  // Never stack a second attempt on top of a live one.
+/**
+ * Tears the recording down for good, discarding what it captured.
+ *
+ * MediaRecorder hands its audio over after stop() returns — with no timeslice
+ * the whole recording arrives in one late dataavailable, then stop — and onstop
+ * rebuilds the playback from it. Stop wants exactly that. A reset or a fresh
+ * start does not: left attached, those handlers put the discarded recording
+ * back into state and onto a visible player (verified in headless Chrome).
+ * Detaching them before the teardown means nothing comes back.
+ */
+function discardRecording() {
+  if (state.mediaRecorder) {
+    state.mediaRecorder.ondataavailable = null;
+    state.mediaRecorder.onstop = null;
+  }
   teardownRecording();
+}
+
+async function startAudioRecording() {
+  // Never stack a second attempt on top of a live one, and never let that
+  // one's late audio land in this session.
+  discardRecording();
 
   state.audioChunks = [];
   state.recordingSeconds = 0;
@@ -1768,22 +1787,67 @@ async function executeApproveAndDelete() {
     });
   }
 
-  // Clear raw audio and transcript from client memory
-  if (state.audioUrl) {
-    URL.revokeObjectURL(state.audioUrl);
-    state.audioUrl = null;
-  }
-  state.audioChunks = [];
-  state.transcript = '';
+  clearRawSessionData();
   state.consentGiven = false;
 
   paintSuccessCopy(discardOnly);
 
   setTimeout(() => {
     showScreen('success-screen');
+    // Only once the overlay covers it: emptying the panels any earlier would
+    // blank the review screen while the button still shows its spinner.
+    clearReviewPanels();
   }, 600);
 
   await wipeEvent;
+}
+
+/**
+ * Drops every browser-side copy of the raw session: the recording, the
+ * transcript wherever it is kept, and the draft. The approved note is not raw
+ * data and is left alone; callers capture it first and clear it themselves.
+ */
+function clearRawSessionData() {
+  discardRecording();
+
+  /*
+   * Revoking the object URL is not enough on its own: media the player already
+   * loaded stays playable, and removing src without load() changes nothing
+   * either (both verified in headless Chrome). pause → remove src → load()
+   * empties the element; src = '' would fire an error event instead.
+   */
+  if (elements.audioPlayback) {
+    elements.audioPlayback.pause();
+    elements.audioPlayback.removeAttribute('src');
+    elements.audioPlayback.load();
+    elements.audioPlayback.hidden = true;
+  }
+  if (state.audioUrl) URL.revokeObjectURL(state.audioUrl);
+  state.audioUrl = null;
+  state.audioChunks = [];
+
+  // The transcript, in every place it lives. Drafting reads the textarea first.
+  state.transcript = '';
+  state.baseTranscript = '';
+  state.speechTranscriptBuffer = '';
+  if (elements.transcriptInput) elements.transcriptInput.value = '';
+
+  // The draft, and the edits made to it.
+  state.generatedNoteResponse = null;
+  state.noteOriginals = {};
+  state.noteEdits = {};
+}
+
+/**
+ * Empties the review screen, which holds the draft's text, quotes lifted from
+ * the transcript, and session details. Every render rewrites all of these, so
+ * clearing them cannot affect the next draft.
+ */
+function clearReviewPanels() {
+  if (elements.noteBody) elements.noteBody.innerHTML = '';
+  if (elements.evidenceChips) elements.evidenceChips.innerHTML = '';
+  if (elements.missingFields) elements.missingFields.innerHTML = '';
+  if (elements.readinessLabel) elements.readinessLabel.textContent = '';
 }
 
 /**
@@ -1795,29 +1859,19 @@ function resetSessionState() {
    * previously left isRecording true, a stale mediaRecorder, and a live
    * recogniser behind, so a second session inherited the first one's broken
    * state — and an undead recogniser kept the microphone indicator lit.
+   *
+   * clearRawSessionData() does that teardown, discarding what was captured, and
+   * clears every copy of the session's words and audio. Without it a new
+   * session inherited the previous transcript, so one client's session could be
+   * drafted into another's note.
    */
-  teardownRecording();
+  clearRawSessionData();
+  clearReviewPanels();
   setMicState('idle');
 
   state.recordingSeconds = 0;
   state.consentGiven = false;
-  state.audioChunks = [];
-  if (state.audioUrl) URL.revokeObjectURL(state.audioUrl);
-  state.audioUrl = null;
-  state.generatedNoteResponse = null;
-  state.noteOriginals = {};
-  state.noteEdits = {};
   state.approvedNote = null;
-
-  /*
-   * Clear the session's words too. Without this a new session inherited the
-   * previous transcript — in state and still sitting in the textarea — so one
-   * client's session could be drafted into another's note.
-   */
-  state.transcript = '';
-  state.baseTranscript = '';
-  state.speechTranscriptBuffer = '';
-  if (elements.transcriptInput) elements.transcriptInput.value = '';
 
   // Clears the offline notice and returns the primary action to "Approve",
   // enabled — executeApproveAndDelete() leaves it disabled and mid-spinner.
