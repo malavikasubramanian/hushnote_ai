@@ -9,7 +9,7 @@ HushNote is a local-first, privacy-focused clinical note drafting prototype desi
 
 - **Local-First LLM Processing**: Interacts directly with a local **Ollama** instance running Gemma (`gemma4` by default; override with `OLLAMA_MODEL`).
 - **Zero Raw Data Retention**: Audio never leaves the browser. The transcript reaches the local server only for the length of a drafting request and is **not kept there**; the browser's own copy of the audio and transcript is cleared when the note is approved or the session is discarded.
-- **Timestamped Evidence Quotes**: Grounds generated notes in quotes from the session transcript. A quote's time comes from the transcript's own `[MM:SS]` markers and is shown only when the quote can be matched to one; otherwise its chip says "time not available". Live recordings have no markers, so quotes from them never carry a time.
+- **Verified Evidence Quotes**: Grounds generated notes in quotes checked against the session transcript, never trusted from the model. Each quote is matched as verbatim, abridged (marked with `...` or `[brackets]`, so what was left out stays visible), or unverified (not found in the transcript, or too short to count as evidence) — shown as three distinct chip shapes, not colour alone. A quote's time comes from the transcript's own `[MM:SS]` markers and is shown only when the quote can be matched to one; otherwise its chip says "time not available". Live recordings have no markers, so quotes from them never carry a time.
 - **Adaptive Purpose Readiness**:
   - **Progress Tracking**: Validates therapeutic outcomes and linked evidence quotes.
   - **Billing-Ready**: Ensures duration verification, intervention notes, and treatment plan updates.
@@ -22,7 +22,7 @@ HushNote is a local-first, privacy-focused clinical note drafting prototype desi
 
 The privacy claims above aren't just a description, they're the result of an actual audit. Early builds of HushNote made several claims that weren't quite true: a fallback note that looked like real model output but wasn't, a billing code derived from the length of the generated note instead of the actual session duration, edits a clinician made on the review screen that got discarded before approval, and a raw transcript the server kept in memory well after a session was reset or discarded, sometimes indefinitely.
 
-Each of those got found and fixed, with the fix verified against the actual failure, not just assumed correct. The server no longer stores the transcript at all, once it became clear nothing in the code ever read it back, so there's nothing left to leak. `clearRawSessionData()` and `clearReviewPanels()` together clear every copy of a session: transcript, audio, draft, and the review screen's own rendered text, on approve, discard, or reset, closing a real bug where a discarded recording could reappear, fully playable, after starting a new session. Evidence timestamps are checked against the transcript's own markers rather than trusted from the model, so a quote never shows a time that isn't actually in the session, including live recordings, which have no timestamps to fabricate from in the first place.
+Each of those got found and fixed, with the fix verified against the actual failure, not just assumed correct. The server no longer stores the transcript at all, once it became clear nothing in the code ever read it back, so there's nothing left to leak. `clearRawSessionData()` and `clearReviewPanels()` together clear every copy of a session: transcript, audio, draft, and the review screen's own rendered text, on approve, discard, or reset, closing a real bug where a discarded recording could reappear, fully playable, after starting a new session. Evidence quotes are located in the transcript itself, word for word, rather than trusted from the model: each is marked verbatim, abridged, or unverified, and only a verbatim or abridged match can carry a timestamp, taken from the transcript's own markers rather than the model's claim, so a quote never shows a time that isn't actually in the session — including live recordings, which have no timestamps to fabricate from in the first place.
 
 ---
 
@@ -108,7 +108,7 @@ Each of those got found and fixed, with the fix verified against the actual fail
 | Draft Note Text Area | `noteBody` | Editable DAP / SOAP note sections |
 | Readiness Status Badge | `readinessLabel` | Displays readiness state ("Ready for therapist review") |
 | Missing Fields Checklist | `missingFields` | Renders missing clinical fields checklist |
-| Evidence Timestamps Container | `evidenceChips` | Displays evidence quote chips, with a time only where one was confirmed against the transcript |
+| Evidence Chips Container | `evidenceChips` | Displays evidence quote chips — verbatim, abridged or unverified — with a time only where one was confirmed against the transcript |
 | Approve & Delete Raw Data Button | `approveDeleteBtn` | Clears the audio, transcript and draft from browser memory, keeping the approved note, and calls POST `/api/delete-raw-session` for the audit log (the wipe does not wait on it) |
 
 ---
@@ -119,7 +119,7 @@ Each of those got found and fixed, with the fix verified against the actual fail
 .
 ├── server.ts             # Express backend: drafts notes with local Ollama, keeps no session data
 ├── readiness.ts          # Readiness report and time-based CPT suggestion (no I/O, unit tested)
-├── verify-evidence.js    # Confirms evidence timestamps against the transcript's own markers
+├── verify-evidence.js    # Locates each evidence quote in the transcript (verbatim/abridged/unverified) and confirms its timestamp
 ├── app.js                # Plain JS state machine & Stitch DOM event wiring
 ├── index.html            # Main UI container holding 8 Stitch-exported screens (app.js also accepts a legacy landing-screen id)
 ├── src/
