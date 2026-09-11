@@ -77,6 +77,21 @@ module.exports = async function run() {
   await App.executeNoteGeneration();
   check('whitespace-only is refused too', App.state.generatedNoteResponse, null);
 
+  console.log('\n  -- a failed draft request lands in the panel, not a browser dialog');
+  const alerts = [];
+  window.alert = (message) => { alerts.push(message); };
+  const workingFetch = window.fetch;
+  window.fetch = () => Promise.reject(new Error('Failed to fetch'));
+  App.state.transcript = TRANSCRIPT;
+  $('purposeError').hidden = true;
+  await App.executeNoteGeneration();
+  check('no alert() was raised', alerts, []);
+  check('back on the purpose screen', App.state.currentScreen, 'purpose-screen');
+  check('the error panel is showing', $('purposeError').hidden, false);
+  check('message says the draft failed', /could not be drafted: Failed to fetch/.test($('purposeErrorText').textContent), true);
+  check('no draft was stored after a failure', App.state.generatedNoteResponse, null);
+  window.fetch = workingFetch;
+
   console.log('\n  -- a real transcript generates normally and clears the error');
   App.state.transcript = TRANSCRIPT;
   App.state.recordingSeconds = 2700;
