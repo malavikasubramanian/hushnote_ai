@@ -454,6 +454,16 @@
       </button>
     </div>
 
+    <!-- Shown only when the wipe request failed. Nothing has been cleared while
+         this is visible, so it must never read as success. -->
+    <div id="purgeError" role="alert" class="flex items-start gap-3 rounded-panel border border-line bg-danger-soft p-4" hidden>
+      <svg class="icon mt-0.5 size-[18px] shrink-0 text-danger" viewBox="0 0 24 24" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+      <div class="space-y-1">
+        <p class="text-body-sm font-semibold text-danger">Raw session data was not wiped</p>
+        <p id="purgeErrorText" class="text-body-sm text-ink-muted"></p>
+      </div>
+    </div>
+
     <div class="grid grid-cols-1 gap-6 lg:grid-cols-12">
       <div class="space-y-6 lg:col-span-8">
         <section class="rounded-card border border-line bg-card p-6 shadow-e1">
