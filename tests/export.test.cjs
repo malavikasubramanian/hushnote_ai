@@ -74,7 +74,7 @@ module.exports = async function run() {
   const { check, results } = createChecker('export');
 
   let out;
-  const { window, App, $ } = boot({
+  const { window, App, $ } = await boot({
     beforeLoad: (w) => { stubApi(w); out = captureOutputs(w); },
   });
 

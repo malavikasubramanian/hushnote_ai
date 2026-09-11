@@ -7,9 +7,9 @@
  */
 const { boot, fire, createChecker } = require('./harness.cjs');
 
-module.exports = function run() {
+module.exports = async function run() {
   const { check, results } = createChecker('editing');
-  const { window, App, $ } = boot();
+  const { window, App, $ } = await boot();
 
   const ta = (key) => $(`note-${key}`);
   const flag = (key) => $(`note-edited-${key}`);
