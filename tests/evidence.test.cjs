@@ -59,6 +59,30 @@ module.exports = async function run() {
     [timed('12:00', 'Timed.'), untimed('Untimed.')]);
   check('no invented time anywhere on the panel', /00:15/.test($('evidenceChips').textContent), false);
 
+  /*
+   * A chip with no quote text used to render the quote as "undefined" (or
+   * "null", "", "[object Object]"). The quote is the evidence, so such an item
+   * gets no chip; with nothing left, the panel shows its empty state.
+   */
+  const EMPTY_STATE = [{ text: 'No explicit timestamp quotes referenced.', clockIcon: false }];
+
+  console.log('\n  -- an item with no quote text gets no chip');
+  check('quote field missing', render([{ timestamp: '01:30' }]), EMPTY_STATE);
+  check('quote null', render([{ quote: null, timestamp: '01:30' }]), EMPTY_STATE);
+  check('empty and whitespace quotes', render([{ quote: '' }, { quote: '   ' }]), EMPTY_STATE);
+  check('non-string quotes', render([{ quote: 42 }, { quote: { text: 'hi' } }]), EMPTY_STATE);
+  check('a real quote among them keeps its chip, alone',
+    render([{ timestamp: '01:30' }, { quote: 'Real.', timestamp: '01:30' }, { quote: '' }]),
+    [timed('01:30', 'Real.')]);
+  check('no "undefined", "null" or "[object Object]" on the panel',
+    /undefined|null|\[object Object\]/.test($('evidenceChips').textContent), false);
+
+  // These threw a TypeError before, so they run last.
+  console.log('\n  -- items and lists that are not evidence at all');
+  check('null and non-object items', render([null, 'x', 7]), EMPTY_STATE);
+  check('evidence that is null', render(null), EMPTY_STATE);
+  check('evidence that is a string', render('x'), EMPTY_STATE);
+
   window.close();
   return results;
 };
